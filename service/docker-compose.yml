@@ -1,12 +1,40 @@
 services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: fortune_avenue
+      POSTGRES_PASSWORD: fortune_avenue
+      POSTGRES_DB: fortune_avenue
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fortune_avenue -d fortune_avenue"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   service:
     build:
       context: .
     ports:
       - "8080:8080"
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: fortune_avenue
+      DB_USERNAME: fortune_avenue
+      DB_PASSWORD: fortune_avenue
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 10s
       timeout: 3s
       retries: 3
       start_period: 15s
+
+volumes:
+  postgres-data:

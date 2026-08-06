@@ -1,8 +1,33 @@
 services:
+  postgres-test:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: fortune_avenue_test
+      POSTGRES_PASSWORD: fortune_avenue_test
+      POSTGRES_DB: fortune_avenue_test
+    # Ephemeral by design — tests shouldn't depend on data surviving
+    # between runs, and tmpfs keeps this instance fast and disposable.
+    tmpfs:
+      - /var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fortune_avenue_test -d fortune_avenue_test"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   test:
     build:
       context: .
       target: test
+    environment:
+      DB_HOST: postgres-test
+      DB_PORT: "5432"
+      DB_NAME: fortune_avenue_test
+      DB_USERNAME: fortune_avenue_test
+      DB_PASSWORD: fortune_avenue_test
+    depends_on:
+      postgres-test:
+        condition: service_healthy
     volumes:
       - ./build/test-results:/workspace/build/test-results
       - ./build/reports:/workspace/build/reports
