@@ -1,4 +1,4 @@
-package com.fortuneavenue.server
+package com.fortuneavenue.server.websocket
 
 import org.springframework.context.annotation.Configuration
 import org.springframework.web.socket.config.annotation.EnableWebSocket

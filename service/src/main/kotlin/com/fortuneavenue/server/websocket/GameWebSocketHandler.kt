@@ -1,4 +1,4 @@
-package com.fortuneavenue.server
+package com.fortuneavenue.server.websocket
 
 import org.springframework.stereotype.Component
 import org.springframework.web.socket.TextMessage
