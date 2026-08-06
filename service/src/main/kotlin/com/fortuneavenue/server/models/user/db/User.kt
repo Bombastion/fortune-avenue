@@ -1,4 +1,4 @@
-package com.fortuneavenue.server.models.user
+package com.fortuneavenue.server.models.user.db
 
 import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.dao.UuidEntity

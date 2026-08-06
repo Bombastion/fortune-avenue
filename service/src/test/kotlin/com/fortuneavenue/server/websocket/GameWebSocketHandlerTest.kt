@@ -1,4 +1,4 @@
-package com.fortuneavenue.server
+package com.fortuneavenue.server.websocket
 
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
