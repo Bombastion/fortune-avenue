@@ -1,0 +1,25 @@
+{
+  "name": "sample-loop-with-branch",
+  "spaces": [
+    { "spaceType": "BASIC" },
+    { "spaceType": "BASIC" },
+    { "spaceType": "BASIC" },
+    { "spaceType": "BASIC" },
+    { "spaceType": "BASIC" },
+    { "spaceType": "BASIC" },
+    { "spaceType": "BASIC" },
+    { "spaceType": "BASIC" }
+  ],
+  "paths": [
+    { "from": 0, "to": 1, "branchOrder": 0 },
+    { "from": 1, "to": 2, "branchOrder": 0 },
+    { "from": 2, "to": 3, "branchOrder": 0 },
+    { "from": 2, "to": 6, "branchOrder": 1 },
+    { "from": 3, "to": 4, "branchOrder": 0 },
+    { "from": 6, "to": 7, "branchOrder": 0 },
+    { "from": 7, "to": 4, "branchOrder": 0 },
+    { "from": 4, "to": 5, "branchOrder": 0 },
+    { "from": 5, "to": 0, "branchOrder": 0 }
+  ],
+  "startSpaceIndex": 0
+}
