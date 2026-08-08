@@ -1,5 +1,6 @@
 package com.fortuneavenue.server.service
 
+import com.fortuneavenue.server.dao.GameDao
 import com.fortuneavenue.server.dao.PlayerDao
 import com.fortuneavenue.server.dao.UserDao
 import com.fortuneavenue.server.models.player.db.Player
@@ -7,20 +8,24 @@ import org.springframework.stereotype.Service
 import kotlin.uuid.Uuid
 
 /**
- * Whether [gameId] itself refers to a real game is deliberately not this
- * class's concern -- that's part of the URL in the REST layer (/games/{id}/players),
- * so a missing game is a 404 the controller decides, not a validation failure
- * that belongs in this Result. What *is* validated here is the player being
- * added: an explicit userId has to point at a real user, and that user can't
- * already be seated in this game.
+ * All validation lives here rather than in PlayerController, specifically so
+ * that "does this game exist" and "is this player valid" behave the same way
+ * no matter who calls this service -- REST today, a WebSocket handler or
+ * anything else later -- rather than each caller having to re-implement
+ * (and potentially get slightly wrong) the same checks.
  */
 @Service
 class PlayerService(
 	private val playerDao: PlayerDao,
+	private val gameDao: GameDao,
 	private val userDao: UserDao,
 ) {
 
 	fun addPlayer(gameId: Uuid, userId: Uuid?): Result<Player> {
+		if (gameDao.findById(gameId) == null) {
+			return Result.failure(GameNotFoundException("Game $gameId does not exist."))
+		}
+
 		if (userId != null) {
 			if (userDao.findById(userId) == null) {
 				return Result.failure(InvalidPlayerException("User $userId does not exist."))
@@ -35,5 +40,10 @@ class PlayerService(
 		return Result.success(playerDao.create(gameId, userId))
 	}
 
-	fun getPlayers(gameId: Uuid): List<Player> = playerDao.findByGameId(gameId)
+	/** Returns null if [gameId] doesn't refer to a real game, an empty list if it does but has no players yet. */
+	fun getPlayers(gameId: Uuid): List<Player>? {
+		if (gameDao.findById(gameId) == null) return null
+
+		return playerDao.findByGameId(gameId)
+	}
 }

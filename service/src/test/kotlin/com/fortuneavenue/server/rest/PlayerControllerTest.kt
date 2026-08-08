@@ -1,6 +1,12 @@
 package com.fortuneavenue.server.rest
 
+import com.fortuneavenue.server.models.board.db.SpaceType
+import com.fortuneavenue.server.models.board.rest.BoardResponse
+import com.fortuneavenue.server.models.board.rest.CreateBoardPathRequest
+import com.fortuneavenue.server.models.board.rest.CreateBoardRequest
+import com.fortuneavenue.server.models.board.rest.CreateBoardSpaceRequest
 import com.fortuneavenue.server.models.common.rest.ErrorResponse
+import com.fortuneavenue.server.models.game.rest.CreateGameRequest
 import com.fortuneavenue.server.models.game.rest.GameResponse
 import com.fortuneavenue.server.models.player.rest.AddPlayerRequest
 import com.fortuneavenue.server.models.player.rest.PlayerResponse
@@ -26,7 +32,28 @@ class PlayerControllerTest {
 	@Autowired
 	lateinit var restTemplate: TestRestTemplate
 
-	private fun createGame(): GameResponse = restTemplate.postForEntity<GameResponse>("/games", null).body!!
+	private fun createBoard(): BoardResponse = restTemplate.postForEntity<BoardResponse>(
+		"/boards",
+		CreateBoardRequest(
+			name = "loop-${Uuid.random()}",
+			spaces = listOf(
+				CreateBoardSpaceRequest(SpaceType.BASIC),
+				CreateBoardSpaceRequest(SpaceType.BASIC),
+				CreateBoardSpaceRequest(SpaceType.BASIC),
+			),
+			paths = listOf(
+				CreateBoardPathRequest(0, 1),
+				CreateBoardPathRequest(1, 2),
+				CreateBoardPathRequest(2, 0),
+			),
+			startSpaceIndex = 0,
+		),
+	).body!!
+
+	private fun createGame(): GameResponse = restTemplate.postForEntity<GameResponse>(
+		"/games",
+		CreateGameRequest(boardId = createBoard().id),
+	).body!!
 
 	private fun createUser(): UserResponse = restTemplate.postForEntity<UserResponse>(
 		"/users",

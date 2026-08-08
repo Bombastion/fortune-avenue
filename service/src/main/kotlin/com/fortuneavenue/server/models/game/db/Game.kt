@@ -7,4 +7,6 @@ import kotlin.uuid.Uuid
 
 class Game(id: EntityID<Uuid>) : UuidEntity(id) {
 	companion object : UuidEntityClass<Game>(GamesTable)
+
+	var boardId by GamesTable.boardId
 }

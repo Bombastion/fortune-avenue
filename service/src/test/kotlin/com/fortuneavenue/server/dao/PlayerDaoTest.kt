@@ -1,5 +1,7 @@
 package com.fortuneavenue.server.dao
 
+import com.fortuneavenue.server.models.board.db.SpaceType
+import com.fortuneavenue.server.models.game.db.Game
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -16,11 +18,26 @@ class PlayerDaoTest {
 	lateinit var gameDao: GameDao
 
 	@Autowired
+	lateinit var boardDao: BoardDao
+
+	@Autowired
 	lateinit var userDao: UserDao
+
+	// DAO-level tests don't need a valid-per-BoardGraphValidator board -- just
+	// a real row for games.board_id to point at.
+	private fun createGame(): Game {
+		val boardId = boardDao.create(
+			name = "board-${Uuid.random()}",
+			spaceInputs = listOf(BoardDao.SpaceInput(SpaceType.BASIC)),
+			pathInputs = emptyList(),
+			startIndex = 0,
+		).board.id.value
+		return gameDao.create(boardId)
+	}
 
 	@Test
 	fun `create persists a player tied to a game and a user`() {
-		val game = gameDao.create()
+		val game = createGame()
 		val user = userDao.create("dave-${Uuid.random()}")
 
 		val created = playerDao.create(gameId = game.id.value, userId = user.id.value)
@@ -33,7 +50,7 @@ class PlayerDaoTest {
 
 	@Test
 	fun `create persists a player with no user, for a future computer opponent`() {
-		val game = gameDao.create()
+		val game = createGame()
 
 		val created = playerDao.create(gameId = game.id.value)
 
@@ -43,8 +60,8 @@ class PlayerDaoTest {
 
 	@Test
 	fun `findByGameId returns only players belonging to that game`() {
-		val gameOne = gameDao.create()
-		val gameTwo = gameDao.create()
+		val gameOne = createGame()
+		val gameTwo = createGame()
 
 		val playerInGameOne = playerDao.create(gameId = gameOne.id.value)
 		playerDao.create(gameId = gameTwo.id.value)

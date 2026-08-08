@@ -1,7 +1,9 @@
 package com.fortuneavenue.server.service
 
+import com.fortuneavenue.server.dao.GameDao
 import com.fortuneavenue.server.dao.PlayerDao
 import com.fortuneavenue.server.dao.UserDao
+import com.fortuneavenue.server.models.game.db.Game
 import com.fortuneavenue.server.models.player.db.Player
 import com.fortuneavenue.server.models.user.db.User
 import org.assertj.core.api.Assertions.assertThat
@@ -24,6 +26,9 @@ class PlayerServiceTest {
 	lateinit var playerDao: PlayerDao
 
 	@Mock
+	lateinit var gameDao: GameDao
+
+	@Mock
 	lateinit var userDao: UserDao
 
 	private lateinit var playerService: PlayerService
@@ -41,13 +46,19 @@ class PlayerServiceTest {
 		return player
 	}
 
+	/** Stubs gameDao so [gameId] looks like a real, existing game. */
+	private fun stubExistingGame() {
+		given(gameDao.findById(gameId)).willReturn(mock(Game::class.java))
+	}
+
 	@BeforeEach
 	fun setUp() {
-		playerService = PlayerService(playerDao, userDao)
+		playerService = PlayerService(playerDao, gameDao, userDao)
 	}
 
 	@Test
 	fun `addPlayer with no userId persists a player with no user, without consulting UserDao`() {
+		stubExistingGame()
 		val createdPlayer = mock(Player::class.java)
 		given(playerDao.create(gameId, null)).willReturn(createdPlayer)
 
@@ -60,6 +71,7 @@ class PlayerServiceTest {
 
 	@Test
 	fun `addPlayer with a real, not-yet-seated userId persists the player`() {
+		stubExistingGame()
 		val userId = Uuid.random()
 		given(userDao.findById(userId)).willReturn(mock(User::class.java))
 		given(playerDao.findByGameId(gameId)).willReturn(emptyList())
@@ -74,6 +86,7 @@ class PlayerServiceTest {
 
 	@Test
 	fun `addPlayer rejects a userId that doesn't belong to a real user`() {
+		stubExistingGame()
 		val userId = Uuid.random()
 		given(userDao.findById(userId)).willReturn(null)
 
@@ -85,6 +98,7 @@ class PlayerServiceTest {
 
 	@Test
 	fun `addPlayer rejects a user who is already seated in the game`() {
+		stubExistingGame()
 		val userId = Uuid.random()
 		given(userDao.findById(userId)).willReturn(mock(User::class.java))
 		// Built and stubbed as its own statement, before the given()/willReturn()
@@ -102,12 +116,35 @@ class PlayerServiceTest {
 	}
 
 	@Test
-	fun `getPlayers delegates to the DAO`() {
+	fun `addPlayer rejects a gameId that doesn't belong to a real game, without consulting UserDao or PlayerDao`() {
+		given(gameDao.findById(gameId)).willReturn(null)
+
+		val result = playerService.addPlayer(gameId, Uuid.random())
+
+		assertThat(result.isFailure).isTrue()
+		assertThat(result.exceptionOrNull()).isInstanceOf(GameNotFoundException::class.java)
+		verifyNoInteractions(userDao)
+		verifyNoInteractions(playerDao)
+	}
+
+	@Test
+	fun `getPlayers delegates to the DAO when the game exists`() {
+		stubExistingGame()
 		val players = listOf(mock(Player::class.java), mock(Player::class.java))
 		given(playerDao.findByGameId(gameId)).willReturn(players)
 
 		val result = playerService.getPlayers(gameId)
 
 		assertThat(result).isSameAs(players)
+	}
+
+	@Test
+	fun `getPlayers returns null when the game doesn't exist, without consulting PlayerDao`() {
+		given(gameDao.findById(gameId)).willReturn(null)
+
+		val result = playerService.getPlayers(gameId)
+
+		assertThat(result).isNull()
+		verifyNoInteractions(playerDao)
 	}
 }
