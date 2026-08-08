@@ -7,13 +7,6 @@ import com.fortuneavenue.server.models.player.db.Player
 import org.springframework.stereotype.Service
 import kotlin.uuid.Uuid
 
-/**
- * All validation lives here rather than in PlayerController, specifically so
- * that "does this game exist" and "is this player valid" behave the same way
- * no matter who calls this service -- REST today, a WebSocket handler or
- * anything else later -- rather than each caller having to re-implement
- * (and potentially get slightly wrong) the same checks.
- */
 @Service
 class PlayerService(
 	private val playerDao: PlayerDao,

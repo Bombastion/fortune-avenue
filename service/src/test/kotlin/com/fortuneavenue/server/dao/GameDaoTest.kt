@@ -16,9 +16,6 @@ class GameDaoTest {
 	@Autowired
 	lateinit var boardDao: BoardDao
 
-	// DAO-level tests don't need a valid-per-BoardGraphValidator board -- that
-	// validation lives in BoardService, not BoardDao -- just a real row for
-	// games.board_id to point at.
 	private fun createBoardId(): Uuid = boardDao.create(
 		name = "board-${Uuid.random()}",
 		spaceInputs = listOf(BoardDao.SpaceInput(SpaceType.BASIC)),

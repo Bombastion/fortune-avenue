@@ -23,8 +23,6 @@ class PlayerDaoTest {
 	@Autowired
 	lateinit var userDao: UserDao
 
-	// DAO-level tests don't need a valid-per-BoardGraphValidator board -- just
-	// a real row for games.board_id to point at.
 	private fun createGame(): Game {
 		val boardId = boardDao.create(
 			name = "board-${Uuid.random()}",

@@ -19,11 +19,6 @@ import kotlin.uuid.Uuid
 /**
  * Nested under /games/{gameId} rather than a top-level /players -- a player
  * only ever makes sense in the context of a specific game.
- *
- * This controller only parses the path/body into typed values and translates
- * PlayerService's outcome into an HTTP status -- it doesn't decide *whether*
- * a game or player is valid. That's PlayerService's job, so the same rules
- * apply no matter what calls it.
  */
 @RestController
 @RequestMapping("/games/{gameId}/players")
