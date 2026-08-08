@@ -12,10 +12,6 @@ object PlayersTable : UuidTable("players") {
 	// (not implemented yet) will be represented once it exists.
 	val userId = optReference("user_id", UsersTable)
 
-	// Mirrors the UNIQUE (game_id, user_id) constraint from the migration --
-	// stops the same user from being added to a game twice, while still
-	// allowing any number of null-user (computer) players per game, since
-	// Postgres treats each NULL as distinct for uniqueness purposes.
 	init {
 		uniqueIndex(gameId, userId)
 	}
