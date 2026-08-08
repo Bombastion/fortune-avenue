@@ -1,19 +1,13 @@
 package com.fortuneavenue.server.graph
 
 /**
- * Generic directed-graph traversal, independent of what a "node" actually
- * is -- callers supply [start] and a [neighbors] function describing the
- * graph.
+ * Generic directed-graph traversal
  */
 object GraphTraversal {
 
 	/**
 	 * Returns every node reachable from [start] by following [neighbors].
-	 * Each node is expanded at most once: [start] is marked visited before
-	 * the walk begins, so arriving back at it (closing a loop) simply ends
-	 * that branch rather than re-expanding it, and the same dedup applies
-	 * to every other node too -- so no cycle, through start or otherwise,
-	 * can cause an infinite loop.
+	 * Each node is expanded at most once
 	 */
 	fun <T> reachableFrom(
 		start: T,

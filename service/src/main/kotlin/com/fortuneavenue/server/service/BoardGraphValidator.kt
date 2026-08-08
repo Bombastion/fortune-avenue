@@ -6,21 +6,8 @@ import com.fortuneavenue.server.graph.TraversalStrategy
 /**
  * Validates a proposed board's graph shape before anything is persisted.
  * A board is valid when:
- *  - every space is reachable from the start space ("no unreachable nodes"), and
- *  - the start space is reachable from every space ("every path eventually
- *    leads back to start").
- *
- * That second condition needs its own traversal over the *reversed* edges
- * rather than reusing the first one. A single forward walk from start,
- * stopping (i.e. not re-expanding) whenever it revisits an already-seen
- * node -- including start itself closing a loop -- correctly finds every
- * space *reachable from* start. But it can't tell the difference between a
- * branch that rejoins the main loop (fine) and a branch that wanders off
- * into its own separate cycle that never comes back to start (invalid):
- * both look like "we hit a node we've already visited" from a forward-only
- * pass. Walking the reversed graph from start answers the complementary
- * question -- "can this space still get back to start?" -- which is what
- * actually catches that case.
+ *  - every space is reachable from the start space, and
+ *  - the start space is reachable from every space
  */
 object BoardGraphValidator {
 

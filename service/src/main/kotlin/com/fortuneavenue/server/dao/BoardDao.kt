@@ -25,24 +25,9 @@ class BoardDao {
 		startIndex: Int,
 	): BoardGraph = transaction {
 		// start_space_id is a plain uuid column, not a typed reference() (see the
-		// comment on BoardsTable), so Exposed's automatic flush-ordering has no
-		// idea `boards` depends on `board_spaces` through it. That makes the
-		// order it picks unreliable here, in two different ways we've hit:
-		//
-		//  1. If start_space_id is set before anything is ever flushed, Exposed
-		//     bundles it straight into board's *initial* INSERT, which can go out
-		//     before board_spaces exists -- FK violation on insert.
-		//  2. Even after forcing board's insert to happen first (so the later
-		//     assignment becomes an UPDATE instead), Exposed's end-of-transaction
-		//     flush still isn't safe: because board_spaces has a real reference()
-		//     to boards, sorting the *board_spaces inserts* pulls `boards` into an
-		//     "update tables that other pending inserts depend on" pass, which
-		//     runs BEFORE board_spaces is actually inserted -- FK violation on
-		//     update instead.
-		//
-		// The reliable fix is to stop trusting the automatic ordering for this
-		// column entirely and flush explicitly at each step, so every statement
-		// only ever runs once we know it's safe to.
+		// comment on BoardsTable), but Board requires it to exist. We do some
+		// wonky stuff with flushing to make sure the space exists, then update
+		// the board.
 		val board = Board.new { this.name = name }
 		board.flush()
 
