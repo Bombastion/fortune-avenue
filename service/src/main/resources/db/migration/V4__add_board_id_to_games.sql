@@ -1,0 +1,2 @@
+ALTER TABLE games
+    ADD COLUMN board_id UUID NOT NULL REFERENCES boards(id);
