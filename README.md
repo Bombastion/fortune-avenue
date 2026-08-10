@@ -6,6 +6,8 @@ See [`service/README.md`](service/README.md) for details on how the server works
 
 ## Technical details for nerds
 
+If you're curious how things are calculated, I found [this incredibly helpful blog post](https://bluepichu.wordpress.com/2012/08/07/fortune-street-calculations-part-1-starting-conditions/) where the author was trying to do basically this project back in 2012.
+
 ### Client
 
 Pending — not started yet. Planning on a React frontend hosted somewhere.
