@@ -1,5 +1,6 @@
 package com.fortuneavenue.server.rest
 
+import com.fortuneavenue.server.DatabaseTest
 import com.fortuneavenue.server.models.user.rest.CreateUserRequest
 import com.fortuneavenue.server.models.user.rest.UserResponse
 import org.assertj.core.api.Assertions.assertThat
@@ -14,7 +15,7 @@ import org.springframework.http.HttpStatus
 import kotlin.uuid.Uuid
 
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
-class UserControllerTest {
+class UserControllerTest : DatabaseTest() {
 
 	@Autowired
 	lateinit var restTemplate: TestRestTemplate

@@ -6,6 +6,7 @@ import com.fortuneavenue.server.models.board.db.SpaceType
 import com.fortuneavenue.server.models.board.rest.CreateBoardPathRequest
 import com.fortuneavenue.server.models.board.rest.CreateBoardRequest
 import com.fortuneavenue.server.models.board.rest.CreateBoardSpaceRequest
+import com.fortuneavenue.server.models.common.rest.SortDirection
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.extension.ExtendWith
 import org.mockito.BDDMockito.given
 import org.mockito.Mock
 import org.mockito.Mockito.mock
+import org.mockito.Mockito.verify
 import org.mockito.Mockito.verifyNoInteractions
 import org.mockito.junit.jupiter.MockitoExtension
 
@@ -72,5 +74,64 @@ class BoardServiceTest {
 		assertThat(result.isFailure).isTrue()
 		assertThat(result.exceptionOrNull()).isInstanceOf(InvalidBoardException::class.java)
 		verifyNoInteractions(boardDao)
+	}
+
+	// --- listBoards ---
+
+	@Test
+	fun `listBoards fails when page is negative`() {
+		val result = boardService.listBoards(page = -1, pageSize = 10)
+
+		assertThat(result.exceptionOrNull()).isInstanceOf(InvalidBoardException::class.java)
+		verifyNoInteractions(boardDao)
+	}
+
+	@Test
+	fun `listBoards fails when pageSize is less than 1`() {
+		val result = boardService.listBoards(page = 0, pageSize = 0)
+
+		assertThat(result.exceptionOrNull()).isInstanceOf(InvalidBoardException::class.java)
+		verifyNoInteractions(boardDao)
+	}
+
+	@Test
+	fun `listBoards defaults to ascending order and returns the requested page's metadata`() {
+		val graphs = listOf(mock(BoardGraph::class.java), mock(BoardGraph::class.java))
+		given(boardDao.findPage(page = 0, pageSize = 2, ascending = true)).willReturn(graphs)
+		given(boardDao.count()).willReturn(5L)
+
+		val result = boardService.listBoards(page = 0, pageSize = 2)
+
+		val page = result.getOrNull()
+		assertThat(page).isNotNull()
+		assertThat(page!!.items).isEqualTo(graphs)
+		assertThat(page.page).isEqualTo(0)
+		assertThat(page.pageSize).isEqualTo(2)
+		assertThat(page.direction).isEqualTo(SortDirection.ASC)
+		// 5 boards at 2 per page is 3 pages (2 full pages + a partial third).
+		assertThat(page.totalPages).isEqualTo(3)
+	}
+
+	@Test
+	fun `listBoards passes descending order through to the DAO`() {
+		given(boardDao.findPage(page = 1, pageSize = 3, ascending = false)).willReturn(emptyList())
+		given(boardDao.count()).willReturn(0L)
+
+		val result = boardService.listBoards(page = 1, pageSize = 3, direction = SortDirection.DESC)
+
+		assertThat(result.isSuccess).isTrue()
+		assertThat(result.getOrNull()?.direction).isEqualTo(SortDirection.DESC)
+		assertThat(result.getOrNull()?.totalPages).isEqualTo(0)
+		verify(boardDao).findPage(page = 1, pageSize = 3, ascending = false)
+	}
+
+	@Test
+	fun `listBoards reports exactly one page when everything fits within pageSize`() {
+		given(boardDao.findPage(page = 0, pageSize = 50, ascending = true)).willReturn(emptyList())
+		given(boardDao.count()).willReturn(3L)
+
+		val result = boardService.listBoards(page = 0, pageSize = 50)
+
+		assertThat(result.getOrNull()?.totalPages).isEqualTo(1)
 	}
 }

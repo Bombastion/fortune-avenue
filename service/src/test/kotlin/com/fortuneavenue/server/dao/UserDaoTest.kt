@@ -1,5 +1,6 @@
 package com.fortuneavenue.server.dao
 
+import com.fortuneavenue.server.DatabaseTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -12,7 +13,7 @@ import kotlin.uuid.Uuid
  * loudly) even if the controller or service change independently.
  */
 @SpringBootTest
-class UserDaoTest {
+class UserDaoTest : DatabaseTest() {
 
 	@Autowired
 	lateinit var userDao: UserDao

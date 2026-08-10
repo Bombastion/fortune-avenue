@@ -6,8 +6,11 @@ import com.fortuneavenue.server.models.board.db.BoardPath
 import com.fortuneavenue.server.models.board.db.BoardPathsTable
 import com.fortuneavenue.server.models.board.db.BoardSpace
 import com.fortuneavenue.server.models.board.db.BoardSpacesTable
+import com.fortuneavenue.server.models.board.db.BoardsTable
 import com.fortuneavenue.server.models.board.db.SpaceType
+import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.springframework.stereotype.Repository
 import kotlin.uuid.Uuid
@@ -61,4 +64,26 @@ class BoardDao {
 
 		BoardGraph(board = board, spaces = spaces, paths = paths)
 	}
+
+	/** Boards are sorted by name until we add sort criteria. */
+	fun findPage(page: Int, pageSize: Int, ascending: Boolean = true): List<BoardGraph> = transaction {
+		val sortOrder = if (ascending) SortOrder.ASC else SortOrder.DESC
+
+		val query = BoardsTable.selectAll()
+			.orderBy(BoardsTable.name, sortOrder)
+			.limit(pageSize)
+			.offset(page.toLong() * pageSize)
+
+		Board.wrapRows(query).map { board ->
+			val spaces = BoardSpace.find { BoardSpacesTable.boardId eq board.id }.toList()
+			val paths = BoardPath.find { BoardPathsTable.boardId eq board.id }.toList()
+			BoardGraph(board = board, spaces = spaces, paths = paths)
+		}
+	}
+
+	/**
+	 * Total number of boards, regardless of any page/pageSize -- used to compute how many pages [findPage] has.
+	 * Will eventually need to make this take search criteria, but we don't have any yet.
+	 * */
+	fun count(): Long = transaction { BoardsTable.selectAll().count() }
 }

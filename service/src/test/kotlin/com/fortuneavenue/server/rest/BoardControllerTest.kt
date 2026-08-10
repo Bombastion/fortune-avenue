@@ -1,11 +1,14 @@
 package com.fortuneavenue.server.rest
 
+import com.fortuneavenue.server.DatabaseTest
 import com.fortuneavenue.server.models.board.db.SpaceType
 import com.fortuneavenue.server.models.board.rest.BoardResponse
 import com.fortuneavenue.server.models.board.rest.CreateBoardPathRequest
 import com.fortuneavenue.server.models.board.rest.CreateBoardRequest
 import com.fortuneavenue.server.models.board.rest.CreateBoardSpaceRequest
 import com.fortuneavenue.server.models.common.rest.ErrorResponse
+import com.fortuneavenue.server.models.common.rest.Page
+import com.fortuneavenue.server.models.common.rest.SortDirection
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -14,11 +17,14 @@ import org.springframework.boot.test.context.SpringBootTest.WebEnvironment
 import org.springframework.boot.test.web.client.TestRestTemplate
 import org.springframework.boot.test.web.client.getForEntity
 import org.springframework.boot.test.web.client.postForEntity
+import org.springframework.core.ParameterizedTypeReference
+import org.springframework.http.HttpMethod
 import org.springframework.http.HttpStatus
+import org.springframework.http.ResponseEntity
 import kotlin.uuid.Uuid
 
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
-class BoardControllerTest {
+class BoardControllerTest : DatabaseTest() {
 
 	@Autowired
 	lateinit var restTemplate: TestRestTemplate
@@ -91,5 +97,76 @@ class BoardControllerTest {
 		val response = restTemplate.getForEntity<String>("/boards/not-a-uuid")
 
 		assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
+	}
+
+	private fun listBoardsPage(query: String): ResponseEntity<Page<BoardResponse>> = restTemplate.exchange(
+		"/boards$query",
+		HttpMethod.GET,
+		null,
+		object : ParameterizedTypeReference<Page<BoardResponse>>() {},
+	)
+
+	private fun createBoards(names: List<String>) = names.shuffled().forEach { name ->
+		restTemplate.postForEntity<BoardResponse>("/boards", validRequest(name))
+	}
+
+	@Test
+	fun `listing boards sorts by name ascending by default`() {
+		createBoards(listOf("c", "a", "b"))
+
+		val response = listBoardsPage("?page=0&pageSize=1000")
+
+		assertThat(response.statusCode).isEqualTo(HttpStatus.OK)
+		val body = response.body!!
+		assertThat(body.page).isEqualTo(0)
+		assertThat(body.pageSize).isEqualTo(1000)
+		assertThat(body.direction).isEqualTo(SortDirection.ASC)
+		assertThat(body.totalPages).isEqualTo(1)
+		assertThat(body.items.map { it.name }).containsExactly("a", "b", "c")
+	}
+
+	@Test
+	fun `listing boards with direction DESC reverses the sort`() {
+		createBoards(listOf("c", "a", "b"))
+
+		val response = listBoardsPage("?page=0&pageSize=1000&direction=DESC")
+
+		assertThat(response.body!!.items.map { it.name }).containsExactly("c", "b", "a")
+	}
+
+	@Test
+	fun `listing boards paginates across pages`() {
+		createBoards(listOf("a", "b", "c"))
+
+		val firstPage = listBoardsPage("?page=0&pageSize=2")
+		val secondPage = listBoardsPage("?page=1&pageSize=2")
+
+		assertThat(firstPage.body!!.items.map { it.name }).containsExactly("a", "b")
+		assertThat(firstPage.body!!.totalPages).isEqualTo(2)
+		assertThat(secondPage.body!!.items.map { it.name }).containsExactly("c")
+	}
+
+	@Test
+	fun `listing boards with a negative page returns 400`() {
+		val response = restTemplate.getForEntity<ErrorResponse>("/boards?page=-1")
+
+		assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
+		assertThat(response.body?.message).isNotBlank()
+	}
+
+	@Test
+	fun `listing boards with a pageSize less than 1 returns 400`() {
+		val response = restTemplate.getForEntity<ErrorResponse>("/boards?pageSize=0")
+
+		assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
+		assertThat(response.body?.message).isNotBlank()
+	}
+
+	@Test
+	fun `listing boards with an invalid direction returns 400`() {
+		val response = restTemplate.getForEntity<ErrorResponse>("/boards?direction=sideways")
+
+		assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
+		assertThat(response.body?.message).isNotBlank()
 	}
 }

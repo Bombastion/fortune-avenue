@@ -20,4 +20,10 @@ object GamesTable : UuidTable("games") {
 	val turnOrder = array<Uuid>("turn_order", UuidColumnType()).nullable()
 
 	val maxTurns = integer("max_turns").default(10)
+
+	// Null whenever nobody's mid-turn -- set to the remaining movement from a
+	// die roll once the current player rolls, decremented as they move
+	// (paused, unchanged, while a human is choosing a branch), and cleared
+	// back to null the moment their turn ends.
+	val currentMovementPoints = integer("current_movement_points").nullable()
 }

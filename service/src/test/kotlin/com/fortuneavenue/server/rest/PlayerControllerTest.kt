@@ -1,5 +1,6 @@
 package com.fortuneavenue.server.rest
 
+import com.fortuneavenue.server.DatabaseTest
 import com.fortuneavenue.server.models.board.db.SpaceType
 import com.fortuneavenue.server.models.board.rest.BoardResponse
 import com.fortuneavenue.server.models.board.rest.CreateBoardPathRequest
@@ -27,7 +28,7 @@ import org.springframework.http.HttpStatus
 import kotlin.uuid.Uuid
 
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
-class PlayerControllerTest {
+class PlayerControllerTest : DatabaseTest() {
 
 	@Autowired
 	lateinit var restTemplate: TestRestTemplate

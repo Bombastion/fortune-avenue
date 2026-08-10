@@ -25,9 +25,16 @@ private data class Connection(val gameId: Uuid, val playerId: Uuid)
  * automatically and turn order is randomly decided as the game starts -- if
  * that puts one or more computer players first, their turns get played out
  * and broadcast immediately, right after the game_started event) and
- * `{"type":"take_turn"}` on its turn to move one space -- any computer
- * players whose turns immediately follow get played out automatically too,
- * each broadcast in turn order right after the requested one.
+ * `{"type":"roll_dice"}` on its turn to roll and move forward that many
+ * spaces. If that movement reaches a space with more than one path out of
+ * it, it pauses there and a `choice_required` event lists the options --
+ * respond with `{"type":"choose_path","spaceId":"<id>"}` to pick one and
+ * keep moving. Any computer players whose turns immediately follow (once
+ * the current player's turn actually ends) are played out automatically
+ * too, each broadcast in turn order right after the requested one. The
+ * moment that chain lands on a human player, a `turn_started` event names
+ * them -- computer turns don't get one, since their own dice_rolled/
+ * player_moved events already make it obvious whose turn it was.
  * See GameSimulationService for the actual rules.
  *
  * Session bookkeeping (who's connected to which game) lives in memory on
@@ -74,11 +81,12 @@ class GameWebSocketHandler(
 
 	override fun handleTextMessage(session: WebSocketSession, message: TextMessage) {
 		val connection = connectionsBySession[session] ?: return
-		val type = runCatching { objectMapper.readValue(message.payload, ClientMessage::class.java) }.getOrNull()?.type
+		val clientMessage = runCatching { objectMapper.readValue(message.payload, ClientMessage::class.java) }.getOrNull()
 
-		when (type) {
+		when (clientMessage?.type) {
 			ClientMessageType.READY -> handleReady(session, connection)
-			ClientMessageType.TAKE_TURN -> handleTakeTurn(session, connection)
+			ClientMessageType.ROLL_DICE -> handleRollDice(session, connection)
+			ClientMessageType.CHOOSE_PATH -> handleChoosePath(session, connection, clientMessage?.spaceId)
 			else -> send(session, ErrorEvent("Unrecognized message: ${message.payload}"))
 		}
 	}
@@ -92,40 +100,60 @@ class GameWebSocketHandler(
 					// If turn order came out with one or more computer players
 					// first, their turns were already played -- broadcast those
 					// too so clients see the board update without anyone having
-					// to send take_turn on their behalf.
-					outcome.openingComputerTurns.forEach { turn -> broadcastTurn(connection.gameId, turn) }
+					// to roll the dice on their behalf.
+					outcome.openingTurnEvents.forEach { event -> broadcastTurnEvent(connection.gameId, event) }
 				}
 			},
 			onFailure = { error -> send(session, ErrorEvent(error.message ?: "Unable to mark ready.")) },
 		)
 	}
 
-	private fun handleTakeTurn(session: WebSocketSession, connection: Connection) {
-		gameSimulationService.takeTurn(connection.gameId, connection.playerId).fold(
-			onSuccess = { turns ->
-				// [turns] is the requested turn followed by any computer
-				// players' turns that got auto-played right after it -- each
-				// gets broadcast in order, same as if every one of them had
-				// been requested individually.
-				turns.forEach { turn -> broadcastTurn(connection.gameId, turn) }
+	private fun handleRollDice(session: WebSocketSession, connection: Connection) {
+		gameSimulationService.rollDice(connection.gameId, connection.playerId).fold(
+			onSuccess = { events ->
+				// [events] is the roll, any moves and/or choice pause it
+				// caused, and then any computer players' full turns that got
+				// auto-played right after -- each gets broadcast in order,
+				// same as if every one of them had been requested individually.
+				events.forEach { event -> broadcastTurnEvent(connection.gameId, event) }
 			},
-			onFailure = { error -> send(session, ErrorEvent(error.message ?: "Unable to take turn.")) },
+			onFailure = { error -> send(session, ErrorEvent(error.message ?: "Unable to roll the dice.")) },
 		)
 	}
 
-	private fun broadcastTurn(gameId: Uuid, turn: GameSimulationService.TurnResult) {
-		broadcast(
-			gameId,
-			TurnTakenEvent(
-				turnNumber = turn.turnNumber,
-				playerId = turn.playerId.toString(),
-				fromSpaceId = turn.fromSpaceId?.toString(),
-				toSpaceId = turn.toSpaceId.toString(),
-			),
+	private fun handleChoosePath(session: WebSocketSession, connection: Connection, spaceId: String?) {
+		val toSpaceId = spaceId?.let { Uuid.parseOrNull(it) }
+			?: return send(session, ErrorEvent("choose_path requires a valid spaceId."))
+
+		gameSimulationService.choosePath(connection.gameId, connection.playerId, toSpaceId).fold(
+			onSuccess = { events -> events.forEach { event -> broadcastTurnEvent(connection.gameId, event) } },
+			onFailure = { error -> send(session, ErrorEvent(error.message ?: "Unable to choose a path.")) },
 		)
-		if (turn.gameOver) {
-			broadcast(gameId, GameOverEvent(turnCount = turn.turnNumber + 1))
+	}
+
+	private fun broadcastTurnEvent(gameId: Uuid, event: GameSimulationService.TurnEvent) {
+		broadcast(gameId, event.toWireEvent())
+		if (event is GameSimulationService.TurnEvent.TurnEnded && event.gameOver) {
+			broadcast(gameId, GameOverEvent(turnCount = event.turnNumber + 1))
 		}
+	}
+
+	private fun GameSimulationService.TurnEvent.toWireEvent(): GameEvent = when (this) {
+		is GameSimulationService.TurnEvent.DiceRolled -> DiceRolledEvent(playerId = playerId.toString(), roll = roll)
+		is GameSimulationService.TurnEvent.Moved -> PlayerMovedEvent(
+			turnNumber = turnNumber,
+			playerId = playerId.toString(),
+			fromSpaceId = fromSpaceId.toString(),
+			toSpaceId = toSpaceId.toString(),
+			movementPointsRemaining = movementPointsRemaining,
+		)
+		is GameSimulationService.TurnEvent.ChoiceRequired -> ChoiceRequiredEvent(
+			playerId = playerId.toString(),
+			spaceId = spaceId.toString(),
+			options = options.map { PathOptionPayload(it.toSpaceId.toString(), it.branchOrder) },
+		)
+		is GameSimulationService.TurnEvent.TurnEnded -> TurnEndedEvent(turnNumber = turnNumber, playerId = playerId.toString())
+		is GameSimulationService.TurnEvent.TurnStarted -> TurnStartedEvent(playerId = playerId.toString(), turnNumber = turnNumber)
 	}
 
 	private fun broadcast(gameId: Uuid, event: GameEvent) {

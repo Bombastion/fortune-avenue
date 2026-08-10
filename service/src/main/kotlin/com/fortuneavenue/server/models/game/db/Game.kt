@@ -12,4 +12,5 @@ class Game(id: EntityID<Uuid>) : UuidEntity(id) {
 	var turnNumber by GamesTable.turnNumber
 	var turnOrder by GamesTable.turnOrder
 	var maxTurns by GamesTable.maxTurns
+	var currentMovementPoints by GamesTable.currentMovementPoints
 }

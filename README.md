@@ -87,14 +87,36 @@ Once every player has readied up, all sockets receive a broadcast:
 Then, from whichever player's socket is next in `turnOrder`, send:
 
 ```json
-{"type":"take_turn"}
+{"type":"roll_dice"}
 ```
 
-All sockets receive the broadcast result, and once the game hits its max turn count, an additional game-over event:
+All sockets receive the roll, followed by one `player_moved` broadcast per space that roll covers:
 
 ```json
-{"type":"turn_taken","turnNumber":0,"playerId":"...","fromSpaceId":null,"toSpaceId":"..."}
+{"type":"dice_rolled","playerId":"...","roll":4}
+{"type":"player_moved","turnNumber":0,"playerId":"...","fromSpaceId":null,"toSpaceId":"...","movementPointsRemaining":3}
+{"type":"player_moved","turnNumber":0,"playerId":"...","fromSpaceId":"...","toSpaceId":"...","movementPointsRemaining":2}
+```
+
+If movement reaches a space with more than one path out of it, it pauses there instead of a `player_moved` broadcast, and lists the options:
+
+```json
+{"type":"choice_required","playerId":"...","spaceId":"...","options":[{"toSpaceId":"...","branchOrder":0},{"toSpaceId":"...","branchOrder":1}]}
+```
+
+Reply from that same player's socket with the space to move onto, and movement picks back up (pausing again if it hits another branch):
+
+```json
+{"type":"choose_path","spaceId":"..."}
+```
+
+Once movement is exhausted, all sockets see the turn end, and — once the game hits its max turn count — an additional game-over event:
+
+```json
+{"type":"turn_ended","turnNumber":0,"playerId":"..."}
 {"type":"game_over","turnCount":10}
 ```
+
+Computer players (players added without a `userId`) never send any of this themselves — the server rolls and moves them automatically, randomly picking a path any time it hits a branch, and broadcasts the results the same way.
 
 Session state is kept in memory per server instance, so this only works against a single running instance, not a load-balanced setup.
