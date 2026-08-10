@@ -4,6 +4,8 @@ import com.fortuneavenue.server.models.board.rest.BoardResponse
 import com.fortuneavenue.server.models.board.rest.CreateBoardRequest
 import com.fortuneavenue.server.models.board.rest.toResponse
 import com.fortuneavenue.server.models.common.rest.ErrorResponse
+import com.fortuneavenue.server.models.common.rest.SortDirection
+import com.fortuneavenue.server.models.common.rest.map
 import com.fortuneavenue.server.service.BoardService
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
@@ -12,6 +14,7 @@ import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import kotlin.uuid.Uuid
 
@@ -30,6 +33,24 @@ class BoardController(
 			onFailure = { error ->
 				ResponseEntity.badRequest().body<Any>(ErrorResponse(error.message ?: "Invalid board"))
 			},
+		)
+	}
+
+	@GetMapping
+	fun listBoards(
+		@RequestParam(defaultValue = "0") page: Int,
+		@RequestParam(defaultValue = "20") pageSize: Int,
+		@RequestParam(defaultValue = "ASC") direction: String,
+	): ResponseEntity<Any> {
+		val sortDirection = SortDirection.entries.firstOrNull { it.name == direction }
+			?: return ResponseEntity.badRequest()
+				.body<Any>(ErrorResponse("direction must be one of ${SortDirection.entries.map { it.name }}."))
+
+		val result = boardService.listBoards(page = page, pageSize = pageSize, direction = sortDirection)
+
+		return result.fold(
+			onSuccess = { boardsPage -> ResponseEntity.ok<Any>(boardsPage.map { it.toResponse() }) },
+			onFailure = { error -> ResponseEntity.badRequest().body<Any>(ErrorResponse(error.message ?: "Invalid pagination request.")) },
 		)
 	}
 

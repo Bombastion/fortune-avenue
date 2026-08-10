@@ -6,8 +6,11 @@ import com.fortuneavenue.server.models.board.db.BoardPath
 import com.fortuneavenue.server.models.board.db.BoardPathsTable
 import com.fortuneavenue.server.models.board.db.BoardSpace
 import com.fortuneavenue.server.models.board.db.BoardSpacesTable
+import com.fortuneavenue.server.models.board.db.BoardsTable
 import com.fortuneavenue.server.models.board.db.SpaceType
+import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.springframework.stereotype.Repository
 import kotlin.uuid.Uuid
@@ -61,4 +64,28 @@ class BoardDao {
 
 		BoardGraph(board = board, spaces = spaces, paths = paths)
 	}
+
+	/** [page] is zero-indexed. Boards are sorted by name, ascending unless [ascending] is false. */
+	fun findPage(page: Int, pageSize: Int, ascending: Boolean = true): List<BoardGraph> = transaction {
+		val sortOrder = if (ascending) SortOrder.ASC else SortOrder.DESC
+
+		// Built as a DSL query (rather than Board.all()) so ordering, limit,
+		// and offset are all pushed down to the database instead of loading
+		// every board into memory just to page over it -- then wrapped back
+		// into entities to keep this method's return type consistent with
+		// the rest of the DAO.
+		val query = BoardsTable.selectAll()
+			.orderBy(BoardsTable.name, sortOrder)
+			.limit(pageSize)
+			.offset(page.toLong() * pageSize)
+
+		Board.wrapRows(query).map { board ->
+			val spaces = BoardSpace.find { BoardSpacesTable.boardId eq board.id }.toList()
+			val paths = BoardPath.find { BoardPathsTable.boardId eq board.id }.toList()
+			BoardGraph(board = board, spaces = spaces, paths = paths)
+		}
+	}
+
+	/** Total number of boards, regardless of any page/pageSize -- used to compute how many pages [findPage] has. */
+	fun count(): Long = transaction { BoardsTable.selectAll().count() }
 }
