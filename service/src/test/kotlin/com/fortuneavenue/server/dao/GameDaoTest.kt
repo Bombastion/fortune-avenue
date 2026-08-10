@@ -42,6 +42,28 @@ class GameDaoTest {
 		assertThat(created.turnNumber).isEqualTo(0)
 		assertThat(created.turnOrder).isNull()
 		assertThat(created.maxTurns).isEqualTo(10)
+		assertThat(created.currentMovementPoints).isNull()
+	}
+
+	@Test
+	fun `setMovementPoints records remaining movement`() {
+		val game = gameDao.create(createBoardId())
+
+		val updated = gameDao.setMovementPoints(game.id.value, 3)
+
+		assertThat(updated).isNotNull()
+		assertThat(updated!!.currentMovementPoints).isEqualTo(3)
+		assertThat(gameDao.findById(game.id.value)!!.currentMovementPoints).isEqualTo(3)
+	}
+
+	@Test
+	fun `setMovementPoints can clear remaining movement back to null`() {
+		val game = gameDao.create(createBoardId())
+		gameDao.setMovementPoints(game.id.value, 3)
+
+		val updated = gameDao.setMovementPoints(game.id.value, null)
+
+		assertThat(updated!!.currentMovementPoints).isNull()
 	}
 
 	@Test
@@ -65,6 +87,17 @@ class GameDaoTest {
 		assertThat(advanced).isNotNull()
 		assertThat(advanced!!.turnNumber).isEqualTo(1)
 		assertThat(gameDao.findById(game.id.value)!!.turnNumber).isEqualTo(1)
+	}
+
+	@Test
+	fun `advanceTurn clears any leftover movement points`() {
+		val game = gameDao.create(createBoardId())
+		gameDao.setMovementPoints(game.id.value, 2)
+
+		val advanced = gameDao.advanceTurn(game.id.value)
+
+		assertThat(advanced!!.currentMovementPoints).isNull()
+		assertThat(gameDao.findById(game.id.value)!!.currentMovementPoints).isNull()
 	}
 
 	@Test

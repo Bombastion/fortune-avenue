@@ -24,7 +24,16 @@ class GameDao {
 		Game.findById(id)?.apply { this.turnOrder = turnOrder }
 	}
 
+	/** Records a roll's remaining movement (or, once a turn pauses on a branch choice, however much is left of it). */
+	fun setMovementPoints(id: Uuid, points: Int?): Game? = transaction {
+		Game.findById(id)?.apply { currentMovementPoints = points }
+	}
+
+	/** Ends the current player's turn: advances to the next player and clears any leftover movement. */
 	fun advanceTurn(id: Uuid): Game? = transaction {
-		Game.findById(id)?.apply { turnNumber += 1 }
+		Game.findById(id)?.apply {
+			turnNumber += 1
+			currentMovementPoints = null
+		}
 	}
 }

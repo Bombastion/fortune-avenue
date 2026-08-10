@@ -20,12 +20,35 @@ data class GameStartedEvent(
 	override val type: String = "game_started",
 ) : GameEvent
 
-data class TurnTakenEvent(
+data class DiceRolledEvent(
+	val playerId: String,
+	val roll: Int,
+	override val type: String = "dice_rolled",
+) : GameEvent
+
+data class PlayerMovedEvent(
 	val turnNumber: Int,
 	val playerId: String,
-	val fromSpaceId: String?,
+	val fromSpaceId: String,
 	val toSpaceId: String,
-	override val type: String = "turn_taken",
+	val movementPointsRemaining: Int,
+	override val type: String = "player_moved",
+) : GameEvent
+
+/** One outgoing path a player can pick with a `choose_path` message. */
+data class PathOptionPayload(val toSpaceId: String, val branchOrder: Int)
+
+data class ChoiceRequiredEvent(
+	val playerId: String,
+	val spaceId: String,
+	val options: List<PathOptionPayload>,
+	override val type: String = "choice_required",
+) : GameEvent
+
+data class TurnEndedEvent(
+	val turnNumber: Int,
+	val playerId: String,
+	override val type: String = "turn_ended",
 ) : GameEvent
 
 data class GameOverEvent(

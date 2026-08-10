@@ -40,6 +40,9 @@ class GameSimulationServiceTest {
 	@Mock
 	lateinit var boardDao: BoardDao
 
+	@Mock
+	lateinit var dice: Dice
+
 	private lateinit var service: GameSimulationService
 
 	private val gameId = Uuid.random()
@@ -47,7 +50,7 @@ class GameSimulationServiceTest {
 
 	@BeforeEach
 	fun setUp() {
-		service = GameSimulationService(gameDao, playerDao, boardDao)
+		service = GameSimulationService(gameDao, playerDao, boardDao, dice)
 	}
 
 	/** [userId] defaults to a human player -- pass null to mock a computer player instead. */
@@ -79,12 +82,18 @@ class GameSimulationServiceTest {
 		return board
 	}
 
-	private fun mockGame(turnOrder: List<Uuid>? = null, turnNumber: Int = 0, maxTurns: Int = 10): Game {
+	private fun mockGame(
+		turnOrder: List<Uuid>? = null,
+		turnNumber: Int = 0,
+		maxTurns: Int = 10,
+		currentMovementPoints: Int? = null,
+	): Game {
 		val game = mock(Game::class.java)
 		lenient().`when`(game.boardId).thenReturn(EntityID(boardId, BoardsTable))
 		lenient().`when`(game.turnOrder).thenReturn(turnOrder)
 		lenient().`when`(game.turnNumber).thenReturn(turnNumber)
 		lenient().`when`(game.maxTurns).thenReturn(maxTurns)
+		lenient().`when`(game.currentMovementPoints).thenReturn(currentMovementPoints)
 		return game
 	}
 
@@ -212,7 +221,7 @@ class GameSimulationServiceTest {
 	}
 
 	@Test
-	fun `markReady plays every leading computer player's turn immediately once the game starts`() {
+	fun `markReady plays every leading computer player's full turn immediately once the game starts`() {
 		// Turn order is randomly shuffled, so which (if any) of these two
 		// computer players ends up leading it isn't known ahead of time --
 		// the DAO stubs below thread turn state through their answers so the
@@ -242,6 +251,7 @@ class GameSimulationServiceTest {
 		lenient().`when`(playerDao.findState(computerAId)).thenReturn(computerAState)
 		lenient().`when`(playerDao.findState(computerBId)).thenReturn(computerBState)
 		lenient().`when`(boardDao.findById(boardId)).thenReturn(boardGraph)
+		lenient().`when`(dice.roll()).thenReturn(1)
 
 		// gameDao.startGame() is called with whatever order shuffled() picks,
 		// which isn't known ahead of time -- rather than reach for an any()
@@ -266,145 +276,276 @@ class GameSimulationServiceTest {
 
 		val outcome = result.getOrNull() as GameSimulationService.ReadyOutcome.GameStarted
 		val leadingComputerIds = outcome.turnOrder.takeWhile { it != humanId }
-		assertThat(outcome.openingComputerTurns.map { it.playerId }).isEqualTo(leadingComputerIds)
-		outcome.openingComputerTurns.forEach { turn -> assertThat(turn.toSpaceId).isEqualTo(nextSpaceId) }
+		val movedEvents = outcome.openingTurnEvents.filterIsInstance<GameSimulationService.TurnEvent.Moved>()
+		assertThat(movedEvents.map { it.playerId }).isEqualTo(leadingComputerIds)
+		movedEvents.forEach { moved -> assertThat(moved.toSpaceId).isEqualTo(nextSpaceId) }
 	}
 
-	// --- takeTurn ---
+	// --- rollDice ---
 
 	@Test
-	fun `takeTurn fails when the game doesn't exist`() {
+	fun `rollDice fails when the game doesn't exist`() {
 		given(gameDao.findById(gameId)).willReturn(null)
 
-		val result = service.takeTurn(gameId, Uuid.random())
+		val result = service.rollDice(gameId, Uuid.random())
 
 		assertThat(result.exceptionOrNull()).isInstanceOf(GameNotFoundException::class.java)
 	}
 
 	@Test
-	fun `takeTurn fails when the game hasn't started`() {
+	fun `rollDice fails when the game hasn't started`() {
 		val game = mockGame(turnOrder = null)
 		given(gameDao.findById(gameId)).willReturn(game)
 
-		val result = service.takeTurn(gameId, Uuid.random())
+		val result = service.rollDice(gameId, Uuid.random())
 
 		assertThat(result.exceptionOrNull()).isInstanceOf(InvalidTurnException::class.java)
 	}
 
 	@Test
-	fun `takeTurn fails when the game is already over`() {
+	fun `rollDice fails when the game is already over`() {
 		val playerId = Uuid.random()
 		val game = mockGame(turnOrder = listOf(playerId), turnNumber = 10, maxTurns = 10)
 		given(gameDao.findById(gameId)).willReturn(game)
 
-		val result = service.takeTurn(gameId, playerId)
+		val result = service.rollDice(gameId, playerId)
 
 		assertThat(result.exceptionOrNull()).isInstanceOf(InvalidTurnException::class.java)
 	}
 
 	@Test
-	fun `takeTurn fails when it isn't the given player's turn`() {
+	fun `rollDice fails when it isn't the given player's turn`() {
 		val currentPlayerId = Uuid.random()
 		val otherPlayerId = Uuid.random()
 		val game = mockGame(turnOrder = listOf(currentPlayerId, otherPlayerId))
 		given(gameDao.findById(gameId)).willReturn(game)
 
-		val result = service.takeTurn(gameId, otherPlayerId)
+		val result = service.rollDice(gameId, otherPlayerId)
 
 		assertThat(result.exceptionOrNull()).isInstanceOf(InvalidTurnException::class.java)
 	}
 
 	@Test
-	fun `takeTurn moves a player from the board's start space on their first move`() {
+	fun `rollDice fails when the player already rolled and has a pending path choice`() {
+		val playerId = Uuid.random()
+		val game = mockGame(turnOrder = listOf(playerId), currentMovementPoints = 2)
+		given(gameDao.findById(gameId)).willReturn(game)
+
+		val result = service.rollDice(gameId, playerId)
+
+		assertThat(result.exceptionOrNull()).isInstanceOf(InvalidTurnException::class.java)
+	}
+
+	@Test
+	fun `rollDice moves a player from the board's start space on their first move`() {
 		val playerId = Uuid.random()
 		val startSpaceId = Uuid.random()
 		val nextSpaceId = Uuid.random()
 		val game = mockGame(turnOrder = listOf(playerId), turnNumber = 0, maxTurns = 10)
+		val player = mockPlayer(playerId)
 		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = null)
 		val board = mockBoard(startSpaceId = startSpaceId)
 		val path = mockPath(from = startSpaceId, to = nextSpaceId, branchOrder = 0)
 		val boardGraph = BoardGraph(board = board, spaces = emptyList(), paths = listOf(path))
 		val advancedGame = mockGame(turnOrder = listOf(playerId), turnNumber = 1, maxTurns = 10)
 		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
 		given(playerDao.findState(playerId)).willReturn(playerState)
 		given(boardDao.findById(boardId)).willReturn(boardGraph)
+		given(dice.roll()).willReturn(1)
 		given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
 
-		val result = service.takeTurn(gameId, playerId)
+		val result = service.rollDice(gameId, playerId)
 
-		val turns = result.getOrNull()
-		assertThat(turns).hasSize(1)
-		val turn = turns!!.single()
-		assertThat(turn.turnNumber).isEqualTo(0)
-		assertThat(turn.fromSpaceId).isEqualTo(startSpaceId)
-		assertThat(turn.toSpaceId).isEqualTo(nextSpaceId)
-		assertThat(turn.gameOver).isFalse()
+		val events = result.getOrNull()
+		assertThat(events).containsExactly(
+			GameSimulationService.TurnEvent.DiceRolled(playerId, 1),
+			GameSimulationService.TurnEvent.Moved(playerId, 0, startSpaceId, nextSpaceId, 0),
+			GameSimulationService.TurnEvent.TurnEnded(playerId, 0, gameOver = false),
+		)
 		verify(playerDao).updatePosition(playerId, nextSpaceId)
 	}
 
 	@Test
-	fun `takeTurn picks the lowest branchOrder when a space has more than one outgoing path`() {
+	fun `rollDice moves the player once per remaining point along a chain of single paths`() {
 		val playerId = Uuid.random()
-		val currentSpaceId = Uuid.random()
-		val wrongBranch = Uuid.random()
-		val rightBranch = Uuid.random()
+		val spaceA = Uuid.random()
+		val spaceB = Uuid.random()
+		val spaceC = Uuid.random()
+		val spaceD = Uuid.random()
 		val game = mockGame(turnOrder = listOf(playerId))
-		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = currentSpaceId)
+		val player = mockPlayer(playerId)
+		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceA)
 		val board = mockBoard()
-		val higherBranchPath = mockPath(from = currentSpaceId, to = wrongBranch, branchOrder = 1)
-		val lowerBranchPath = mockPath(from = currentSpaceId, to = rightBranch, branchOrder = 0)
-		val boardGraph = BoardGraph(board = board, spaces = emptyList(), paths = listOf(higherBranchPath, lowerBranchPath))
+		val boardGraph = BoardGraph(
+			board = board,
+			spaces = emptyList(),
+			paths = listOf(
+				mockPath(spaceA, spaceB, 0),
+				mockPath(spaceB, spaceC, 0),
+				mockPath(spaceC, spaceD, 0),
+			),
+		)
 		val advancedGame = mockGame(turnOrder = listOf(playerId), turnNumber = 1)
 		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
 		given(playerDao.findState(playerId)).willReturn(playerState)
 		given(boardDao.findById(boardId)).willReturn(boardGraph)
+		given(dice.roll()).willReturn(3)
 		given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
 
-		val result = service.takeTurn(gameId, playerId)
+		val result = service.rollDice(gameId, playerId)
 
-		assertThat(result.getOrNull()?.single()?.toSpaceId).isEqualTo(rightBranch)
+		val events = result.getOrNull()
+		assertThat(events).containsExactly(
+			GameSimulationService.TurnEvent.DiceRolled(playerId, 3),
+			GameSimulationService.TurnEvent.Moved(playerId, 0, spaceA, spaceB, 2),
+			GameSimulationService.TurnEvent.Moved(playerId, 0, spaceB, spaceC, 1),
+			GameSimulationService.TurnEvent.Moved(playerId, 0, spaceC, spaceD, 0),
+			GameSimulationService.TurnEvent.TurnEnded(playerId, 0, gameOver = false),
+		)
+		verify(playerDao).updatePosition(playerId, spaceD)
 	}
 
 	@Test
-	fun `takeTurn reports the game as over once it reaches max turns`() {
+	fun `rollDice pauses and lists options when movement reaches a branch for a human player`() {
+		val playerId = Uuid.random()
+		val spaceA = Uuid.random()
+		val spaceB = Uuid.random()
+		val branchC = Uuid.random()
+		val branchD = Uuid.random()
+		val game = mockGame(turnOrder = listOf(playerId))
+		val player = mockPlayer(playerId)
+		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceA)
+		val board = mockBoard()
+		val boardGraph = BoardGraph(
+			board = board,
+			spaces = emptyList(),
+			paths = listOf(
+				mockPath(spaceA, spaceB, 0),
+				mockPath(spaceB, branchC, 0),
+				mockPath(spaceB, branchD, 1),
+			),
+		)
+		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
+		given(playerDao.findState(playerId)).willReturn(playerState)
+		given(boardDao.findById(boardId)).willReturn(boardGraph)
+		given(dice.roll()).willReturn(2)
+
+		val result = service.rollDice(gameId, playerId)
+
+		val events = result.getOrNull()
+		assertThat(events).containsExactly(
+			GameSimulationService.TurnEvent.DiceRolled(playerId, 2),
+			GameSimulationService.TurnEvent.Moved(playerId, 0, spaceA, spaceB, 1),
+			GameSimulationService.TurnEvent.ChoiceRequired(
+				playerId,
+				spaceB,
+				listOf(
+					GameSimulationService.PathOption(branchC, 0),
+					GameSimulationService.PathOption(branchD, 1),
+				),
+			),
+		)
+		verify(gameDao).setMovementPoints(gameId, 1)
+		verify(gameDao, never()).advanceTurn(gameId)
+	}
+
+	@Test
+	fun `rollDice lets a computer player pick a branch randomly instead of pausing`() {
+		val playerId = Uuid.random()
+		// A second, human player after this one in turn order -- otherwise,
+		// with a turn order of just the one computer player, ending its turn
+		// would hand play right back to that same computer again (and
+		// again): fine in production, where advanceTurn genuinely moves
+		// turnNumber toward maxTurns each time, but this test's fixed,
+		// non-incrementing advanceTurn stub would make that loop forever.
+		val otherPlayerId = Uuid.random()
+		val spaceA = Uuid.random()
+		val spaceB = Uuid.random()
+		val branchC = Uuid.random()
+		val branchD = Uuid.random()
+		val game = mockGame(turnOrder = listOf(playerId, otherPlayerId))
+		val player = mockPlayer(playerId, userId = null)
+		val otherPlayer = mockPlayer(otherPlayerId)
+		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceA)
+		val board = mockBoard()
+		val pathToC = mockPath(spaceB, branchC, 0)
+		val pathToD = mockPath(spaceB, branchD, 1)
+		val boardGraph = BoardGraph(
+			board = board,
+			spaces = emptyList(),
+			paths = listOf(mockPath(spaceA, spaceB, 0), pathToC, pathToD),
+		)
+		val advancedGame = mockGame(turnOrder = listOf(playerId, otherPlayerId), turnNumber = 1)
+		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(player, otherPlayer))
+		given(playerDao.findState(playerId)).willReturn(playerState)
+		given(boardDao.findById(boardId)).willReturn(boardGraph)
+		given(dice.roll()).willReturn(2)
+		given(dice.choose(listOf(pathToC, pathToD))).willReturn(pathToD)
+		given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
+
+		val result = service.rollDice(gameId, playerId)
+
+		val events = result.getOrNull()
+		assertThat(events).containsExactly(
+			GameSimulationService.TurnEvent.DiceRolled(playerId, 2),
+			GameSimulationService.TurnEvent.Moved(playerId, 0, spaceA, spaceB, 1),
+			GameSimulationService.TurnEvent.Moved(playerId, 0, spaceB, branchD, 0),
+			GameSimulationService.TurnEvent.TurnEnded(playerId, 0, gameOver = false),
+		)
+		verify(playerDao).updatePosition(playerId, branchD)
+	}
+
+	@Test
+	fun `rollDice reports the game as over once it reaches max turns`() {
 		val playerId = Uuid.random()
 		val spaceId = Uuid.random()
 		val nextSpaceId = Uuid.random()
 		val game = mockGame(turnOrder = listOf(playerId), turnNumber = 9, maxTurns = 10)
+		val player = mockPlayer(playerId)
 		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceId)
 		val board = mockBoard()
-		val path = mockPath(from = spaceId, to = nextSpaceId, branchOrder = 0)
+		val path = mockPath(spaceId, nextSpaceId, 0)
 		val boardGraph = BoardGraph(board = board, spaces = emptyList(), paths = listOf(path))
 		val advancedGame = mockGame(turnOrder = listOf(playerId), turnNumber = 10, maxTurns = 10)
 		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
 		given(playerDao.findState(playerId)).willReturn(playerState)
 		given(boardDao.findById(boardId)).willReturn(boardGraph)
+		given(dice.roll()).willReturn(1)
 		given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
 
-		val result = service.takeTurn(gameId, playerId)
+		val result = service.rollDice(gameId, playerId)
 
-		assertThat(result.getOrNull()?.single()?.gameOver).isTrue()
+		val turnEnded = result.getOrNull()?.filterIsInstance<GameSimulationService.TurnEvent.TurnEnded>()?.single()
+		assertThat(turnEnded?.gameOver).isTrue()
 	}
 
 	@Test
-	fun `takeTurn fails when there's no path forward from the current space`() {
+	fun `rollDice fails when there's no path forward from the current space`() {
 		val playerId = Uuid.random()
 		val spaceId = Uuid.random()
 		val game = mockGame(turnOrder = listOf(playerId))
+		val player = mockPlayer(playerId)
 		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceId)
 		val board = mockBoard()
 		val boardGraph = BoardGraph(board = board, spaces = emptyList(), paths = emptyList())
 		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
 		given(playerDao.findState(playerId)).willReturn(playerState)
 		given(boardDao.findById(boardId)).willReturn(boardGraph)
+		given(dice.roll()).willReturn(1)
 
-		val result = service.takeTurn(gameId, playerId)
+		val result = service.rollDice(gameId, playerId)
 
 		assertThat(result.exceptionOrNull()).isInstanceOf(InvalidTurnException::class.java)
 	}
 
 	@Test
-	fun `takeTurn does not auto-play the next human player's turn`() {
+	fun `rollDice does not auto-play the next human player's turn`() {
 		val playerId = Uuid.random()
 		val otherPlayerId = Uuid.random()
 		val startSpaceId = Uuid.random()
@@ -421,15 +562,18 @@ class GameSimulationServiceTest {
 		given(playerDao.findByGameId(gameId)).willReturn(listOf(player, otherPlayer))
 		given(playerDao.findState(playerId)).willReturn(playerState)
 		given(boardDao.findById(boardId)).willReturn(boardGraph)
+		given(dice.roll()).willReturn(1)
 		given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
 
-		val result = service.takeTurn(gameId, playerId)
+		val result = service.rollDice(gameId, playerId)
 
-		assertThat(result.getOrNull()).hasSize(1)
+		val events = result.getOrNull()
+		assertThat(events).isNotNull()
+		assertThat(events!!.map { it.playerId }).containsOnly(playerId)
 	}
 
 	@Test
-	fun `takeTurn automatically plays the following computer player's turn`() {
+	fun `rollDice automatically plays the following computer player's full turn`() {
 		val humanId = Uuid.random()
 		val computerId = Uuid.random()
 		val startSpaceId = Uuid.random()
@@ -453,22 +597,22 @@ class GameSimulationServiceTest {
 		given(playerDao.findState(humanId)).willReturn(humanState)
 		given(playerDao.findState(computerId)).willReturn(computerState)
 		given(boardDao.findById(boardId)).willReturn(boardGraph)
+		given(dice.roll()).willReturn(1)
 		given(gameDao.advanceTurn(gameId)).willReturn(afterHumanTurn, afterComputerTurn)
 
-		val result = service.takeTurn(gameId, humanId)
+		val result = service.rollDice(gameId, humanId)
 
-		val turns = result.getOrNull()
-		assertThat(turns).hasSize(2)
-		assertThat(turns!![0].playerId).isEqualTo(humanId)
-		assertThat(turns[0].toSpaceId).isEqualTo(humanNextSpaceId)
-		assertThat(turns[1].playerId).isEqualTo(computerId)
-		assertThat(turns[1].toSpaceId).isEqualTo(computerNextSpaceId)
+		val events = result.getOrNull()
+		assertThat(events).isNotNull()
+		val movedEvents = events!!.filterIsInstance<GameSimulationService.TurnEvent.Moved>()
+		assertThat(movedEvents.map { it.playerId }).containsExactly(humanId, computerId)
+		assertThat(movedEvents.map { it.toSpaceId }).containsExactly(humanNextSpaceId, computerNextSpaceId)
 		verify(playerDao).updatePosition(humanId, humanNextSpaceId)
 		verify(playerDao).updatePosition(computerId, computerNextSpaceId)
 	}
 
 	@Test
-	fun `takeTurn plays consecutive computer players' turns until the next human's turn`() {
+	fun `rollDice plays consecutive computer players' turns until the next human's turn`() {
 		val humanId = Uuid.random()
 		val computerAId = Uuid.random()
 		val computerBId = Uuid.random()
@@ -504,12 +648,179 @@ class GameSimulationServiceTest {
 		given(playerDao.findState(computerAId)).willReturn(computerAState)
 		given(playerDao.findState(computerBId)).willReturn(computerBState)
 		given(boardDao.findById(boardId)).willReturn(boardGraph)
+		given(dice.roll()).willReturn(1)
 		given(gameDao.advanceTurn(gameId)).willReturn(afterHuman, afterComputerA, afterComputerB)
 
-		val result = service.takeTurn(gameId, humanId)
+		val result = service.rollDice(gameId, humanId)
 
-		val turns = result.getOrNull()
-		assertThat(turns).hasSize(3)
-		assertThat(turns!!.map { it.playerId }).containsExactly(humanId, computerAId, computerBId)
+		val events = result.getOrNull()
+		assertThat(events).isNotNull()
+		val movedEvents = events!!.filterIsInstance<GameSimulationService.TurnEvent.Moved>()
+		assertThat(movedEvents.map { it.playerId }).containsExactly(humanId, computerAId, computerBId)
+	}
+
+	// --- choosePath ---
+
+	@Test
+	fun `choosePath fails when the game doesn't exist`() {
+		given(gameDao.findById(gameId)).willReturn(null)
+
+		val result = service.choosePath(gameId, Uuid.random(), Uuid.random())
+
+		assertThat(result.exceptionOrNull()).isInstanceOf(GameNotFoundException::class.java)
+	}
+
+	@Test
+	fun `choosePath fails when it isn't the given player's turn`() {
+		val currentPlayerId = Uuid.random()
+		val otherPlayerId = Uuid.random()
+		val game = mockGame(turnOrder = listOf(currentPlayerId, otherPlayerId))
+		given(gameDao.findById(gameId)).willReturn(game)
+
+		val result = service.choosePath(gameId, otherPlayerId, Uuid.random())
+
+		assertThat(result.exceptionOrNull()).isInstanceOf(InvalidTurnException::class.java)
+	}
+
+	@Test
+	fun `choosePath fails when the player hasn't rolled the dice yet`() {
+		val playerId = Uuid.random()
+		val game = mockGame(turnOrder = listOf(playerId), currentMovementPoints = null)
+		given(gameDao.findById(gameId)).willReturn(game)
+
+		val result = service.choosePath(gameId, playerId, Uuid.random())
+
+		assertThat(result.exceptionOrNull()).isInstanceOf(InvalidTurnException::class.java)
+	}
+
+	@Test
+	fun `choosePath fails when the chosen space isn't a valid option`() {
+		val playerId = Uuid.random()
+		val spaceId = Uuid.random()
+		val validChoice = Uuid.random()
+		val invalidChoice = Uuid.random()
+		val game = mockGame(turnOrder = listOf(playerId), currentMovementPoints = 1)
+		val player = mockPlayer(playerId)
+		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceId)
+		val board = mockBoard()
+		val boardGraph = BoardGraph(board = board, spaces = emptyList(), paths = listOf(mockPath(spaceId, validChoice, 0)))
+		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
+		given(playerDao.findState(playerId)).willReturn(playerState)
+		given(boardDao.findById(boardId)).willReturn(boardGraph)
+
+		val result = service.choosePath(gameId, playerId, invalidChoice)
+
+		assertThat(result.exceptionOrNull()).isInstanceOf(InvalidTurnException::class.java)
+	}
+
+	@Test
+	fun `choosePath moves onto the chosen branch and ends the turn once movement is exhausted`() {
+		val playerId = Uuid.random()
+		val spaceId = Uuid.random()
+		val branchC = Uuid.random()
+		val branchD = Uuid.random()
+		val game = mockGame(turnOrder = listOf(playerId), turnNumber = 0, currentMovementPoints = 1)
+		val player = mockPlayer(playerId)
+		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceId)
+		val board = mockBoard()
+		val boardGraph = BoardGraph(
+			board = board,
+			spaces = emptyList(),
+			paths = listOf(mockPath(spaceId, branchC, 0), mockPath(spaceId, branchD, 1)),
+		)
+		val advancedGame = mockGame(turnOrder = listOf(playerId), turnNumber = 1)
+		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
+		given(playerDao.findState(playerId)).willReturn(playerState)
+		given(boardDao.findById(boardId)).willReturn(boardGraph)
+		given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
+
+		val result = service.choosePath(gameId, playerId, branchD)
+
+		val events = result.getOrNull()
+		assertThat(events).containsExactly(
+			GameSimulationService.TurnEvent.Moved(playerId, 0, spaceId, branchD, 0),
+			GameSimulationService.TurnEvent.TurnEnded(playerId, 0, gameOver = false),
+		)
+		verify(playerDao).updatePosition(playerId, branchD)
+	}
+
+	@Test
+	fun `choosePath keeps moving with any movement left over after the choice`() {
+		val playerId = Uuid.random()
+		val spaceId = Uuid.random()
+		val branchC = Uuid.random()
+		val afterBranch = Uuid.random()
+		val game = mockGame(turnOrder = listOf(playerId), turnNumber = 0, currentMovementPoints = 2)
+		val player = mockPlayer(playerId)
+		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceId)
+		val board = mockBoard()
+		val boardGraph = BoardGraph(
+			board = board,
+			spaces = emptyList(),
+			paths = listOf(
+				mockPath(spaceId, branchC, 0),
+				mockPath(spaceId, Uuid.random(), 1),
+				mockPath(branchC, afterBranch, 0),
+			),
+		)
+		val advancedGame = mockGame(turnOrder = listOf(playerId), turnNumber = 1)
+		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
+		given(playerDao.findState(playerId)).willReturn(playerState)
+		given(boardDao.findById(boardId)).willReturn(boardGraph)
+		given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
+
+		val result = service.choosePath(gameId, playerId, branchC)
+
+		val events = result.getOrNull()
+		assertThat(events).containsExactly(
+			GameSimulationService.TurnEvent.Moved(playerId, 0, spaceId, branchC, 1),
+			GameSimulationService.TurnEvent.Moved(playerId, 0, branchC, afterBranch, 0),
+			GameSimulationService.TurnEvent.TurnEnded(playerId, 0, gameOver = false),
+		)
+	}
+
+	@Test
+	fun `choosePath chains into the next computer player's turn once the human's turn ends`() {
+		val humanId = Uuid.random()
+		val computerId = Uuid.random()
+		val spaceId = Uuid.random()
+		val branchC = Uuid.random()
+		val computerSpaceId = Uuid.random()
+		val computerNextSpaceId = Uuid.random()
+		val turnOrder = listOf(humanId, computerId)
+		val game = mockGame(turnOrder = turnOrder, turnNumber = 0, currentMovementPoints = 1)
+		val human = mockPlayer(humanId)
+		val computer = mockPlayer(computerId, userId = null)
+		val humanState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceId)
+		val computerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = computerSpaceId)
+		val board = mockBoard()
+		val computerPath = mockPath(computerSpaceId, computerNextSpaceId, 0)
+		val boardGraph = BoardGraph(
+			board = board,
+			spaces = emptyList(),
+			paths = listOf(mockPath(spaceId, branchC, 0), computerPath),
+		)
+		val afterHuman = mockGame(turnOrder = turnOrder, turnNumber = 1)
+		val afterComputer = mockGame(turnOrder = turnOrder, turnNumber = 2)
+		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(human, computer))
+		given(playerDao.findState(humanId)).willReturn(humanState)
+		given(playerDao.findState(computerId)).willReturn(computerState)
+		given(boardDao.findById(boardId)).willReturn(boardGraph)
+		given(dice.roll()).willReturn(1)
+		given(gameDao.advanceTurn(gameId)).willReturn(afterHuman, afterComputer)
+
+		val result = service.choosePath(gameId, humanId, branchC)
+
+		val events = result.getOrNull()
+		assertThat(events).isNotNull()
+		assertThat(events!!.filterIsInstance<GameSimulationService.TurnEvent.DiceRolled>().map { it.playerId })
+			.containsExactly(computerId)
+		val movedEvents = events.filterIsInstance<GameSimulationService.TurnEvent.Moved>()
+		assertThat(movedEvents.map { it.playerId }).containsExactly(humanId, computerId)
+		assertThat(movedEvents.last().toSpaceId).isEqualTo(computerNextSpaceId)
 	}
 }

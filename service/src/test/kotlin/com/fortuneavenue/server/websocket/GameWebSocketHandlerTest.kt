@@ -67,8 +67,8 @@ class GameWebSocketHandlerTest {
 			).get(5, TimeUnit.SECONDS)
 		}
 
-		fun send(type: String) {
-			session.sendMessage(TextMessage(objectMapper.writeValueAsString(ClientMessage(type))))
+		fun send(type: String, spaceId: String? = null) {
+			session.sendMessage(TextMessage(objectMapper.writeValueAsString(ClientMessage(type, spaceId))))
 		}
 
 		fun nextEvent(): JsonNode = events.poll(5, TimeUnit.SECONDS) ?: error("Timed out waiting for an event.")
@@ -94,8 +94,32 @@ class GameWebSocketHandlerTest {
 		),
 	).body!!
 
-	private fun createGame(): GameResponse =
-		restTemplate.postForEntity<GameResponse>("/games", CreateGameRequest(boardId = createBoard().id)).body!!
+	/**
+	 * Space 0 (the start) forks to spaces 1 and 2, each of which leads
+	 * straight back to 0 -- so movement always pauses for a choice the
+	 * instant it reaches (or returns to) the start, regardless of the roll.
+	 */
+	private fun createBranchingBoard(): BoardResponse = restTemplate.postForEntity<BoardResponse>(
+		"/boards",
+		CreateBoardRequest(
+			name = "branch-${Uuid.random()}",
+			spaces = listOf(
+				CreateBoardSpaceRequest(SpaceType.BASIC),
+				CreateBoardSpaceRequest(SpaceType.BASIC),
+				CreateBoardSpaceRequest(SpaceType.BASIC),
+			),
+			paths = listOf(
+				CreateBoardPathRequest(0, 1, branchOrder = 0),
+				CreateBoardPathRequest(0, 2, branchOrder = 1),
+				CreateBoardPathRequest(1, 0),
+				CreateBoardPathRequest(2, 0),
+			),
+			startSpaceIndex = 0,
+		),
+	).body!!
+
+	private fun createGame(board: BoardResponse = createBoard()): GameResponse =
+		restTemplate.postForEntity<GameResponse>("/games", CreateGameRequest(boardId = board.id)).body!!
 
 	private fun createUser(): UserResponse =
 		restTemplate.postForEntity<UserResponse>("/users", CreateUserRequest(username = "user-${Uuid.random()}")).body!!
@@ -103,7 +127,7 @@ class GameWebSocketHandlerTest {
 	/**
 	 * Omitting [userId] adds a computer player (no user behind the seat) --
 	 * pass a real user's id for a human one. Most of these tests want an
-	 * actual person driving ready-up/take-turn over the socket, so they pass
+	 * actual person driving ready-up/roll-dice over the socket, so they pass
 	 * one; the computer-player test below deliberately doesn't.
 	 */
 	private fun addPlayer(gameId: String, userId: String? = null): PlayerResponse =
@@ -145,7 +169,7 @@ class GameWebSocketHandlerTest {
 	}
 
 	@Test
-	fun `two players readying up starts the game, and the first player in turn order can move`() {
+	fun `two players readying up starts the game, and the first player in turn order can roll and move`() {
 		val game = createGame()
 		val playerA = addHumanPlayer(game.id)
 		val playerB = addHumanPlayer(game.id)
@@ -167,20 +191,68 @@ class GameWebSocketHandlerTest {
 		assertThat(startedEventA["type"].asText()).isEqualTo("game_started")
 		assertThat(startedEventB).isEqualTo(startedEventA)
 		val turnOrder = startedEventA["turnOrder"].map { it.asText() }
-		assertThat(turnOrder).containsExactlyInAnyOrder(playerA.id, playerB.id)
 
 		val firstClient = if (turnOrder.first() == playerA.id) clientA else clientB
 		val secondClient = if (firstClient === clientA) clientB else clientA
 
-		secondClient.send("take_turn")
+		secondClient.send("roll_dice")
 		assertThat(secondClient.nextEvent()["type"].asText()).isEqualTo("error")
 
-		firstClient.send("take_turn")
-		val turnEventOnFirst = firstClient.nextEvent()
-		assertThat(turnEventOnFirst["type"].asText()).isEqualTo("turn_taken")
-		assertThat(turnEventOnFirst["playerId"].asText()).isEqualTo(turnOrder.first())
-		assertThat(turnEventOnFirst["turnNumber"].asInt()).isEqualTo(0)
-		assertThat(secondClient.nextEvent()).isEqualTo(turnEventOnFirst)
+		firstClient.send("roll_dice")
+		val diceEventOnFirst = firstClient.nextEvent()
+		assertThat(diceEventOnFirst["type"].asText()).isEqualTo("dice_rolled")
+		assertThat(diceEventOnFirst["playerId"].asText()).isEqualTo(turnOrder.first())
+		val roll = diceEventOnFirst["roll"].asInt()
+		assertThat(roll).isBetween(1, 6)
+		assertThat(secondClient.nextEvent()).isEqualTo(diceEventOnFirst)
+
+		// The board is a plain loop with no branches, so the roll always
+		// resolves as that many player_moved events in a row, then the turn
+		// ending -- nothing ever pauses for a choice.
+		repeat(roll) {
+			val movedOnFirst = firstClient.nextEvent()
+			assertThat(movedOnFirst["type"].asText()).isEqualTo("player_moved")
+			assertThat(secondClient.nextEvent()).isEqualTo(movedOnFirst)
+		}
+
+		val turnEndedOnFirst = firstClient.nextEvent()
+		assertThat(turnEndedOnFirst["type"].asText()).isEqualTo("turn_ended")
+		assertThat(turnEndedOnFirst["turnNumber"].asInt()).isEqualTo(0)
+		assertThat(secondClient.nextEvent()).isEqualTo(turnEndedOnFirst)
+	}
+
+	@Test
+	fun `reaching a branch pauses for a choice, which choose_path then resolves`() {
+		val game = createGame(createBranchingBoard())
+		val playerA = addHumanPlayer(game.id)
+		val playerB = addHumanPlayer(game.id)
+		val clientA = RecordingClient().also { it.connect(game.id, playerA.id) }
+		val clientB = RecordingClient().also { it.connect(game.id, playerB.id) }
+		assertThat(clientA.nextEvent()["type"].asText()).isEqualTo("connected")
+		assertThat(clientB.nextEvent()["type"].asText()).isEqualTo("connected")
+
+		clientA.send("ready")
+		clientA.nextEvent()
+		clientB.nextEvent()
+		clientB.send("ready")
+		clientA.nextEvent()
+		clientB.nextEvent()
+		val startedEventA = clientA.nextEvent()
+		clientB.nextEvent()
+		val turnOrder = startedEventA["turnOrder"].map { it.asText() }
+		val firstClient = if (turnOrder.first() == playerA.id) clientA else clientB
+
+		firstClient.send("roll_dice")
+		assertThat(firstClient.nextEvent()["type"].asText()).isEqualTo("dice_rolled")
+		val choiceEvent = firstClient.nextEvent()
+		assertThat(choiceEvent["type"].asText()).isEqualTo("choice_required")
+		val options = choiceEvent["options"].map { it["toSpaceId"].asText() }
+		assertThat(options).hasSize(2)
+
+		firstClient.send("choose_path", spaceId = options.first())
+		val movedEvent = firstClient.nextEvent()
+		assertThat(movedEvent["type"].asText()).isEqualTo("player_moved")
+		assertThat(movedEvent["toSpaceId"].asText()).isEqualTo(options.first())
 	}
 
 	@Test
