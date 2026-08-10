@@ -12,4 +12,8 @@ object PlayerStatesTable : UuidTable("player_states") {
 	// Nullable: a freshly created player hasn't been placed on the board yet
 	// (no start-of-game logic exists to do that placement yet either).
 	val currentSpaceId = optReference("current_space_id", BoardSpacesTable)
+
+	val status = enumerationByName("status", STATUS_LENGTH, PlayerStatus::class).default(PlayerStatus.WAITING)
 }
+
+private const val STATUS_LENGTH = 50
