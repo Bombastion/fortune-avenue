@@ -22,7 +22,7 @@ This walks through starting the server, setting up a game via REST, and playing 
 
 ### 1. Set up the game via REST
 
-Create a board (a start space plus at least one path out of it), a game on that board, a user, and a player for that user in the game:
+Create a board (every space must be reachable from the start space *and* able to path back to it — i.e. a closed loop, not just a line), a game on that board, a user, and a player for that user in the game:
 
 ```bash
 # Create a board -> save the returned id as BOARD_ID
@@ -37,7 +37,8 @@ curl -s -X POST http://localhost:8080/boards \
     ],
     "paths": [
       { "from": 0, "to": 1, "branchOrder": 0 },
-      { "from": 1, "to": 2, "branchOrder": 0 }
+      { "from": 1, "to": 2, "branchOrder": 0 },
+      { "from": 2, "to": 0, "branchOrder": 0 }
     ],
     "startSpaceIndex": 0
   }'
@@ -50,7 +51,7 @@ curl -s -X POST http://localhost:8080/games \
 # Create a user -> save the returned id as USER_ID
 curl -s -X POST http://localhost:8080/users \
   -H "Content-Type: application/json" \
-  -d '{ "username": "tyler" }'
+  -d '{ "username": "coolgamer" }'
 
 # Add the user as a player in the game -> save the returned id as PLAYER_ID
 curl -s -X POST http://localhost:8080/games/GAME_ID/players \
