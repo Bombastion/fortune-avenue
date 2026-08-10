@@ -26,24 +26,6 @@ import org.mockito.Mockito.verify
 import org.mockito.junit.jupiter.MockitoExtension
 import kotlin.uuid.Uuid
 
-/**
- * Every mockFoo() helper below performs its own given().willReturn() calls.
- * Because of that, a helper call can NEVER be nested directly inside the
- * argument list of another given(...).willReturn(...) -- Kotlin evaluates
- * that argument (running the helper's own stubbing) before the outer
- * willReturn() is reached, and Mockito rejects starting a new stub while the
- * outer one is still open with an UnfinishedStubbingException. So every mock
- * gets built into a local val on its own line first, and only plain,
- * already-built values are ever passed to willReturn().
- *
- * The mockFoo() helpers stub every property a mock might need across *all*
- * tests, but any given test typically only exercises a subset of them (e.g.
- * markReady never touches game.boardId/turnNumber/maxTurns). With strict
- * stubbing (the MockitoExtension default) that leftover stubbing throws
- * UnnecessaryStubbingException, so helper stubs are set up via lenient()
- * rather than given(). Stubs set up directly in each test body stay strict,
- * since those are always expected to be used by that specific test.
- */
 @ExtendWith(MockitoExtension::class)
 class GameSimulationServiceTest {
 

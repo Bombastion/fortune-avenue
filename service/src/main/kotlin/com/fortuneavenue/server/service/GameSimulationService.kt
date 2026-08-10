@@ -13,11 +13,7 @@ import kotlin.uuid.Uuid
  * for now -- one space forward per turn, always following the lowest
  * branchOrder path out of a space -- since there's no dice roll or player
  * choice of branch yet.
- *
- * A "turn" here is one player's move, not a full round: turnNumber counts
- * up by one per move and cycles through turnOrder via `turnNumber % size`,
- * so with 3 players, turns 0/1/2 are their first moves, 3/4/5 their second,
- * and so on. The game ends once turnNumber reaches maxTurns.
+ * The game ends once turnNumber reaches maxTurns.
  */
 @Service
 class GameSimulationService(
