@@ -12,20 +12,6 @@ import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.springframework.stereotype.Repository
 import kotlin.uuid.Uuid
 
-/**
- * [userId] is optional -- a player doesn't have to be tied to a person.
- * A null user is how a computer opponent (not implemented yet) will be
- * represented once it exists.
- *
- * Unlike BoardDao, create() here never needs an explicit flush() to control
- * statement ordering: gameId and userId always point at rows from a
- * *previous, already-committed* transaction (the caller creates the game --
- * and optionally the user -- first), never at something being inserted in
- * this same transaction. So there's no ordering for Exposed to get wrong.
- * player_states.player_id is the one same-transaction reference here, but
- * it's a genuine, typed reference() (unlike boards.start_space_id), so
- * Exposed's own flush ordering already knows to insert the player first.
- */
 @Repository
 class PlayerDao {
 
@@ -35,8 +21,7 @@ class PlayerDao {
 			this.userId = userId?.let { EntityID(it, UsersTable) }
 		}
 
-		// Every player gets state the moment it exists -- see PlayerStatesTable
-		// for why this is a separate table rather than columns on Player.
+		// Every player gets state the moment it exists
 		PlayerState.new {
 			this.playerId = player.id
 		}

@@ -9,11 +9,6 @@ import org.jetbrains.exposed.v1.core.dao.id.UuidTable
 object GamesTable : UuidTable("games") {
 	val boardId = reference("board_id", BoardsTable)
 
-	// Backed by a SQL-level DEFAULT 0, not this .default(0) -- Exposed only
-	// sends columns present in an entity's writeValues on insert, so as long
-	// as nothing explicitly sets turnNumber when creating a game, it's simply
-	// left out of the INSERT and Postgres' own default fills it in. The
-	// .default(0) here mainly documents that and covers in-memory reads
-	// before the entity is flushed.
+	// Defaults to 0, indicated pre-game
 	val turnNumber = integer("turn_number").default(0)
 }

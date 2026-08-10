@@ -5,7 +5,7 @@ import org.jetbrains.exposed.v1.core.dao.id.UuidTable
 
 // Deliberately minimal beyond position for now -- money, owned properties,
 // items, etc. all land here later as their own columns rather than on
-// PlayersTable, which stays about identity (which game, which user).
+// PlayersTable
 object PlayerStatesTable : UuidTable("player_states") {
 	val playerId = reference("player_id", PlayersTable).uniqueIndex()
 
