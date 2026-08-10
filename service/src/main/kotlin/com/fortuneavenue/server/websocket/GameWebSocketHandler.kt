@@ -21,8 +21,13 @@ private data class Connection(val gameId: Uuid, val playerId: Uuid)
  * to a real player in that game.
  *
  * Once connected, a client can send `{"type":"ready"}` to mark itself ready
- * (once every player in the game has, turn order is randomly decided and the
- * game starts) and `{"type":"take_turn"}` on its turn to move one space.
+ * (once every human player in the game has, computer players are readied up
+ * automatically and turn order is randomly decided as the game starts -- if
+ * that puts one or more computer players first, their turns get played out
+ * and broadcast immediately, right after the game_started event) and
+ * `{"type":"take_turn"}` on its turn to move one space -- any computer
+ * players whose turns immediately follow get played out automatically too,
+ * each broadcast in turn order right after the requested one.
  * See GameSimulationService for the actual rules.
  *
  * Session bookkeeping (who's connected to which game) lives in memory on
@@ -84,6 +89,11 @@ class GameWebSocketHandler(
 				broadcast(connection.gameId, PlayerReadyEvent(playerId = connection.playerId.toString()))
 				if (outcome is GameSimulationService.ReadyOutcome.GameStarted) {
 					broadcast(connection.gameId, GameStartedEvent(turnOrder = outcome.turnOrder.map { it.toString() }))
+					// If turn order came out with one or more computer players
+					// first, their turns were already played -- broadcast those
+					// too so clients see the board update without anyone having
+					// to send take_turn on their behalf.
+					outcome.openingComputerTurns.forEach { turn -> broadcastTurn(connection.gameId, turn) }
 				}
 			},
 			onFailure = { error -> send(session, ErrorEvent(error.message ?: "Unable to mark ready.")) },
@@ -92,22 +102,30 @@ class GameWebSocketHandler(
 
 	private fun handleTakeTurn(session: WebSocketSession, connection: Connection) {
 		gameSimulationService.takeTurn(connection.gameId, connection.playerId).fold(
-			onSuccess = { turn ->
-				broadcast(
-					connection.gameId,
-					TurnTakenEvent(
-						turnNumber = turn.turnNumber,
-						playerId = turn.playerId.toString(),
-						fromSpaceId = turn.fromSpaceId?.toString(),
-						toSpaceId = turn.toSpaceId.toString(),
-					),
-				)
-				if (turn.gameOver) {
-					broadcast(connection.gameId, GameOverEvent(turnCount = turn.turnNumber + 1))
-				}
+			onSuccess = { turns ->
+				// [turns] is the requested turn followed by any computer
+				// players' turns that got auto-played right after it -- each
+				// gets broadcast in order, same as if every one of them had
+				// been requested individually.
+				turns.forEach { turn -> broadcastTurn(connection.gameId, turn) }
 			},
 			onFailure = { error -> send(session, ErrorEvent(error.message ?: "Unable to take turn.")) },
 		)
+	}
+
+	private fun broadcastTurn(gameId: Uuid, turn: GameSimulationService.TurnResult) {
+		broadcast(
+			gameId,
+			TurnTakenEvent(
+				turnNumber = turn.turnNumber,
+				playerId = turn.playerId.toString(),
+				fromSpaceId = turn.fromSpaceId?.toString(),
+				toSpaceId = turn.toSpaceId.toString(),
+			),
+		)
+		if (turn.gameOver) {
+			broadcast(gameId, GameOverEvent(turnCount = turn.turnNumber + 1))
+		}
 	}
 
 	private fun broadcast(gameId: Uuid, event: GameEvent) {

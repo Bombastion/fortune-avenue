@@ -11,6 +11,8 @@ import com.fortuneavenue.server.models.game.rest.CreateGameRequest
 import com.fortuneavenue.server.models.game.rest.GameResponse
 import com.fortuneavenue.server.models.player.rest.AddPlayerRequest
 import com.fortuneavenue.server.models.player.rest.PlayerResponse
+import com.fortuneavenue.server.models.user.rest.CreateUserRequest
+import com.fortuneavenue.server.models.user.rest.UserResponse
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -95,8 +97,19 @@ class GameWebSocketHandlerTest {
 	private fun createGame(): GameResponse =
 		restTemplate.postForEntity<GameResponse>("/games", CreateGameRequest(boardId = createBoard().id)).body!!
 
-	private fun addPlayer(gameId: String): PlayerResponse =
-		restTemplate.postForEntity<PlayerResponse>("/games/$gameId/players", AddPlayerRequest()).body!!
+	private fun createUser(): UserResponse =
+		restTemplate.postForEntity<UserResponse>("/users", CreateUserRequest(username = "user-${Uuid.random()}")).body!!
+
+	/**
+	 * Omitting [userId] adds a computer player (no user behind the seat) --
+	 * pass a real user's id for a human one. Most of these tests want an
+	 * actual person driving ready-up/take-turn over the socket, so they pass
+	 * one; the computer-player test below deliberately doesn't.
+	 */
+	private fun addPlayer(gameId: String, userId: String? = null): PlayerResponse =
+		restTemplate.postForEntity<PlayerResponse>("/games/$gameId/players", AddPlayerRequest(userId = userId)).body!!
+
+	private fun addHumanPlayer(gameId: String): PlayerResponse = addPlayer(gameId, userId = createUser().id)
 
 	@Test
 	fun `connecting as a real player in a real game sends a connected event`() {
@@ -134,8 +147,8 @@ class GameWebSocketHandlerTest {
 	@Test
 	fun `two players readying up starts the game, and the first player in turn order can move`() {
 		val game = createGame()
-		val playerA = addPlayer(game.id)
-		val playerB = addPlayer(game.id)
+		val playerA = addHumanPlayer(game.id)
+		val playerB = addHumanPlayer(game.id)
 		val clientA = RecordingClient().also { it.connect(game.id, playerA.id) }
 		val clientB = RecordingClient().also { it.connect(game.id, playerB.id) }
 		assertThat(clientA.nextEvent()["type"].asText()).isEqualTo("connected")
@@ -168,6 +181,22 @@ class GameWebSocketHandlerTest {
 		assertThat(turnEventOnFirst["playerId"].asText()).isEqualTo(turnOrder.first())
 		assertThat(turnEventOnFirst["turnNumber"].asInt()).isEqualTo(0)
 		assertThat(secondClient.nextEvent()).isEqualTo(turnEventOnFirst)
+	}
+
+	@Test
+	fun `a computer player is automatically readied once every human player is`() {
+		val game = createGame()
+		val human = addHumanPlayer(game.id)
+		addPlayer(game.id) // no userId -- a computer player
+		val client = RecordingClient().also { it.connect(game.id, human.id) }
+		assertThat(client.nextEvent()["type"].asText()).isEqualTo("connected")
+
+		client.send("ready")
+
+		// Only the human ever sends "ready" -- the computer player getting
+		// readied up automatically is what lets the game start right away.
+		assertThat(client.nextEvent()["type"].asText()).isEqualTo("player_ready")
+		assertThat(client.nextEvent()["type"].asText()).isEqualTo("game_started")
 	}
 
 	companion object {
