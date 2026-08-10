@@ -1,5 +1,6 @@
 package com.fortuneavenue.server.dao
 
+import com.fortuneavenue.server.DatabaseTest
 import com.fortuneavenue.server.models.board.db.SpaceType
 import com.fortuneavenue.server.models.game.db.Game
 import com.fortuneavenue.server.models.player.db.PlayerStatus
@@ -10,7 +11,7 @@ import org.springframework.boot.test.context.SpringBootTest
 import kotlin.uuid.Uuid
 
 @SpringBootTest
-class PlayerDaoTest {
+class PlayerDaoTest : DatabaseTest() {
 
 	@Autowired
 	lateinit var playerDao: PlayerDao

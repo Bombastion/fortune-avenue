@@ -65,15 +65,10 @@ class BoardDao {
 		BoardGraph(board = board, spaces = spaces, paths = paths)
 	}
 
-	/** [page] is zero-indexed. Boards are sorted by name, ascending unless [ascending] is false. */
+	/** Boards are sorted by name until we add sort criteria. */
 	fun findPage(page: Int, pageSize: Int, ascending: Boolean = true): List<BoardGraph> = transaction {
 		val sortOrder = if (ascending) SortOrder.ASC else SortOrder.DESC
 
-		// Built as a DSL query (rather than Board.all()) so ordering, limit,
-		// and offset are all pushed down to the database instead of loading
-		// every board into memory just to page over it -- then wrapped back
-		// into entities to keep this method's return type consistent with
-		// the rest of the DAO.
 		val query = BoardsTable.selectAll()
 			.orderBy(BoardsTable.name, sortOrder)
 			.limit(pageSize)
@@ -86,6 +81,9 @@ class BoardDao {
 		}
 	}
 
-	/** Total number of boards, regardless of any page/pageSize -- used to compute how many pages [findPage] has. */
+	/**
+	 * Total number of boards, regardless of any page/pageSize -- used to compute how many pages [findPage] has.
+	 * Will eventually need to make this take search criteria, but we don't have any yet.
+	 * */
 	fun count(): Long = transaction { BoardsTable.selectAll().count() }
 }

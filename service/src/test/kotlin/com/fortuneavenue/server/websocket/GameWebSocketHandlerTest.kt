@@ -2,6 +2,7 @@ package com.fortuneavenue.server.websocket
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fortuneavenue.server.DatabaseTest
 import com.fortuneavenue.server.models.board.db.SpaceType
 import com.fortuneavenue.server.models.board.rest.BoardResponse
 import com.fortuneavenue.server.models.board.rest.CreateBoardPathRequest
@@ -36,7 +37,7 @@ import kotlin.uuid.Uuid
 	webEnvironment = WebEnvironment.DEFINED_PORT,
 	properties = ["server.port=18099"],
 )
-class GameWebSocketHandlerTest {
+class GameWebSocketHandlerTest : DatabaseTest() {
 
 	@Autowired
 	lateinit var restTemplate: TestRestTemplate

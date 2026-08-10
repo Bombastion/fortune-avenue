@@ -1,5 +1,6 @@
 package com.fortuneavenue.server.dao
 
+import com.fortuneavenue.server.DatabaseTest
 import com.fortuneavenue.server.models.board.db.SpaceType
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -8,7 +9,7 @@ import org.springframework.boot.test.context.SpringBootTest
 import kotlin.uuid.Uuid
 
 @SpringBootTest
-class GameDaoTest {
+class GameDaoTest : DatabaseTest() {
 
 	@Autowired
 	lateinit var gameDao: GameDao

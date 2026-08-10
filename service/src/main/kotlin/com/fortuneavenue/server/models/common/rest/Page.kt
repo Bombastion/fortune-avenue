@@ -9,9 +9,7 @@ enum class SortDirection {
  * A single page of [items], plus enough about how it was fetched to page
  * further -- the [page]/[pageSize]/[direction] that were requested, and
  * [totalPages] at that [pageSize] so a client knows when it's reached the
- * end. Meant to be the return shape for any paginated list endpoint, not
- * just boards -- only [T] (and how it's produced) should ever need to
- * change per endpoint.
+ * end
  */
 data class Page<T>(
 	val items: List<T>,

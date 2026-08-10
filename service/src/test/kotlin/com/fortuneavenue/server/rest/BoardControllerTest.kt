@@ -1,5 +1,6 @@
 package com.fortuneavenue.server.rest
 
+import com.fortuneavenue.server.DatabaseTest
 import com.fortuneavenue.server.models.board.db.SpaceType
 import com.fortuneavenue.server.models.board.rest.BoardResponse
 import com.fortuneavenue.server.models.board.rest.CreateBoardPathRequest
@@ -23,7 +24,7 @@ import org.springframework.http.ResponseEntity
 import kotlin.uuid.Uuid
 
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
-class BoardControllerTest {
+class BoardControllerTest : DatabaseTest() {
 
 	@Autowired
 	lateinit var restTemplate: TestRestTemplate
@@ -98,11 +99,6 @@ class BoardControllerTest {
 		assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
 	}
 
-	// The boards table is shared across the whole test run and nothing ever
-	// cleans it up, so these tests give their boards a name prefixed with a
-	// fresh random id -- guaranteed not to collide with anything another
-	// test created -- and pick their own boards back out of a page that may
-	// also contain plenty of unrelated ones from elsewhere in the suite.
 	private fun listBoardsPage(query: String): ResponseEntity<Page<BoardResponse>> = restTemplate.exchange(
 		"/boards$query",
 		HttpMethod.GET,
@@ -116,9 +112,7 @@ class BoardControllerTest {
 
 	@Test
 	fun `listing boards sorts by name ascending by default`() {
-		val prefix = "pg-${Uuid.random()}-"
-		val names = listOf("${prefix}1", "${prefix}2", "${prefix}3")
-		createBoards(names)
+		createBoards(listOf("c", "a", "b"))
 
 		val response = listBoardsPage("?page=0&pageSize=1000")
 
@@ -127,20 +121,29 @@ class BoardControllerTest {
 		assertThat(body.page).isEqualTo(0)
 		assertThat(body.pageSize).isEqualTo(1000)
 		assertThat(body.direction).isEqualTo(SortDirection.ASC)
-		val ours = body.items.filter { it.name.startsWith(prefix) }
-		assertThat(ours.map { it.name }).containsExactly(names[0], names[1], names[2])
+		assertThat(body.totalPages).isEqualTo(1)
+		assertThat(body.items.map { it.name }).containsExactly("a", "b", "c")
 	}
 
 	@Test
 	fun `listing boards with direction DESC reverses the sort`() {
-		val prefix = "pg-${Uuid.random()}-"
-		val names = listOf("${prefix}1", "${prefix}2", "${prefix}3")
-		createBoards(names)
+		createBoards(listOf("c", "a", "b"))
 
 		val response = listBoardsPage("?page=0&pageSize=1000&direction=DESC")
 
-		val ours = response.body!!.items.filter { it.name.startsWith(prefix) }
-		assertThat(ours.map { it.name }).containsExactly(names[2], names[1], names[0])
+		assertThat(response.body!!.items.map { it.name }).containsExactly("c", "b", "a")
+	}
+
+	@Test
+	fun `listing boards paginates across pages`() {
+		createBoards(listOf("a", "b", "c"))
+
+		val firstPage = listBoardsPage("?page=0&pageSize=2")
+		val secondPage = listBoardsPage("?page=1&pageSize=2")
+
+		assertThat(firstPage.body!!.items.map { it.name }).containsExactly("a", "b")
+		assertThat(firstPage.body!!.totalPages).isEqualTo(2)
+		assertThat(secondPage.body!!.items.map { it.name }).containsExactly("c")
 	}
 
 	@Test

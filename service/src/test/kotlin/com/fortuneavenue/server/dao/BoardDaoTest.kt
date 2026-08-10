@@ -1,5 +1,6 @@
 package com.fortuneavenue.server.dao
 
+import com.fortuneavenue.server.DatabaseTest
 import com.fortuneavenue.server.models.board.db.SpaceType
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -8,7 +9,7 @@ import org.springframework.boot.test.context.SpringBootTest
 import kotlin.uuid.Uuid
 
 @SpringBootTest
-class BoardDaoTest {
+class BoardDaoTest : DatabaseTest() {
 
 	@Autowired
 	lateinit var boardDao: BoardDao
@@ -54,14 +55,6 @@ class BoardDaoTest {
 		assertThat(result).isNull()
 	}
 
-	/**
-	 * This table is shared across every test in the suite and nothing ever
-	 * cleans it up between runs, so these tests can't assume they're the
-	 * only rows in it. Each one uses a name prefixed with a fresh random id
-	 * (guaranteed not to collide with anything another test created) so its
-	 * own boards can be picked back out of a page that may also contain
-	 * plenty of unrelated ones.
-	 */
 	private fun createBoardWithName(name: String) = boardDao.create(
 		name = name,
 		spaceInputs = listOf(BoardDao.SpaceInput(SpaceType.BASIC)),
@@ -71,56 +64,57 @@ class BoardDaoTest {
 
 	@Test
 	fun `findPage sorts boards by name ascending by default`() {
-		val prefix = "pg-${Uuid.random()}-"
-		val names = listOf("${prefix}1", "${prefix}2", "${prefix}3")
-		names.shuffled().forEach { createBoardWithName(it) }
+		listOf("c", "a", "b").forEach { createBoardWithName(it) }
 
-		val ours = boardDao.findPage(page = 0, pageSize = LARGE_PAGE_SIZE, ascending = true)
-			.filter { it.board.name.startsWith(prefix) }
+		val page = boardDao.findPage(page = 0, pageSize = 10, ascending = true)
 
-		assertThat(ours.map { it.board.name }).containsExactly(names[0], names[1], names[2])
+		assertThat(page.map { it.board.name }).containsExactly("a", "b", "c")
 	}
 
 	@Test
 	fun `findPage sorts descending when ascending is false`() {
-		val prefix = "pg-${Uuid.random()}-"
-		val names = listOf("${prefix}1", "${prefix}2", "${prefix}3")
-		names.shuffled().forEach { createBoardWithName(it) }
+		listOf("c", "a", "b").forEach { createBoardWithName(it) }
 
-		val ours = boardDao.findPage(page = 0, pageSize = LARGE_PAGE_SIZE, ascending = false)
-			.filter { it.board.name.startsWith(prefix) }
+		val page = boardDao.findPage(page = 0, pageSize = 10, ascending = false)
 
-		assertThat(ours.map { it.board.name }).containsExactly(names[2], names[1], names[0])
+		assertThat(page.map { it.board.name }).containsExactly("c", "b", "a")
 	}
 
 	@Test
 	fun `findPage never returns more boards than pageSize`() {
-		val prefix = "pg-${Uuid.random()}-"
-		repeat(3) { createBoardWithName("$prefix$it") }
+		repeat(3) { createBoardWithName("board-$it") }
 
 		val page = boardDao.findPage(page = 0, pageSize = 1, ascending = true)
 
-		assertThat(page).hasSizeLessThanOrEqualTo(1)
+		assertThat(page).hasSize(1)
+	}
+
+	@Test
+	fun `findPage slices boards across pages without overlap`() {
+		listOf("a", "b", "c").forEach { createBoardWithName(it) }
+
+		val firstPage = boardDao.findPage(page = 0, pageSize = 2, ascending = true)
+		val secondPage = boardDao.findPage(page = 1, pageSize = 2, ascending = true)
+
+		assertThat(firstPage.map { it.board.name }).containsExactly("a", "b")
+		assertThat(secondPage.map { it.board.name }).containsExactly("c")
 	}
 
 	@Test
 	fun `findPage returns an empty list once past the last page`() {
-		val page = boardDao.findPage(page = FAR_PAST_ANY_REASONABLE_TABLE_SIZE, pageSize = 10, ascending = true)
+		createBoardWithName("only-board-${Uuid.random()}")
+
+		val page = boardDao.findPage(page = 1, pageSize = 10, ascending = true)
 
 		assertThat(page).isEmpty()
 	}
 
 	@Test
-	fun `count increases as boards are created`() {
-		val before = boardDao.count()
+	fun `count reflects exactly how many boards exist`() {
+		assertThat(boardDao.count()).isZero()
 
-		createBoardWithName("count-me-${Uuid.random()}")
+		repeat(3) { createBoardWithName("board-$it") }
 
-		assertThat(boardDao.count()).isEqualTo(before + 1)
-	}
-
-	companion object {
-		private const val LARGE_PAGE_SIZE = 10_000
-		private const val FAR_PAST_ANY_REASONABLE_TABLE_SIZE = 1_000_000
+		assertThat(boardDao.count()).isEqualTo(3)
 	}
 }
