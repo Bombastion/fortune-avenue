@@ -36,6 +36,13 @@ class GameDaoTest {
 	}
 
 	@Test
+	fun `create starts a game at turn zero`() {
+		val created = gameDao.create(createBoardId())
+
+		assertThat(created.turnNumber).isEqualTo(0)
+	}
+
+	@Test
 	fun `findById returns null for an id that does not exist`() {
 		val result = gameDao.findById(Uuid.random())
 
