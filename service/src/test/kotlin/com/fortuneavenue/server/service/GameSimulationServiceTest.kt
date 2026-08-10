@@ -43,6 +43,9 @@ class GameSimulationServiceTest {
 	@Mock
 	lateinit var dice: Dice
 
+	@Mock
+	lateinit var computerPlayer: ComputerPlayer
+
 	private lateinit var service: GameSimulationService
 
 	private val gameId = Uuid.random()
@@ -50,7 +53,7 @@ class GameSimulationServiceTest {
 
 	@BeforeEach
 	fun setUp() {
-		service = GameSimulationService(gameDao, playerDao, boardDao, dice)
+		service = GameSimulationService(gameDao, playerDao, boardDao, dice, computerPlayer)
 	}
 
 	/** [userId] defaults to a human player -- pass null to mock a computer player instead. */
@@ -484,7 +487,7 @@ class GameSimulationServiceTest {
 		given(playerDao.findState(playerId)).willReturn(playerState)
 		given(boardDao.findById(boardId)).willReturn(boardGraph)
 		given(dice.roll()).willReturn(2)
-		given(dice.choose(listOf(pathToC, pathToD))).willReturn(pathToD)
+		given(computerPlayer.chooseBranch(listOf(pathToC, pathToD))).willReturn(pathToD)
 		given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
 
 		val result = service.rollDice(gameId, playerId)

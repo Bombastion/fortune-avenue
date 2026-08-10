@@ -21,10 +21,10 @@ import kotlin.uuid.Uuid
  * space they're on only has one path out of it. The moment they land
  * somewhere with more than one outgoing path, movement pauses: a human
  * player has to choose which branch to take (see [choosePath]) before
- * moving continues, while a computer player picks randomly right away and
- * keeps going without ever pausing. The turn ends once movement reaches
- * zero with no choice pending, at which point play moves to the next
- * player in turn order.
+ * moving continues, while a computer player picks right away (see
+ * [ComputerPlayer]) and keeps going without ever pausing. The turn ends
+ * once movement reaches zero with no choice pending, at which point play
+ * moves to the next player in turn order.
  * The game ends once turnNumber reaches maxTurns.
  *
  * A player with no [com.fortuneavenue.server.models.player.db.Player.userId]
@@ -42,6 +42,7 @@ class GameSimulationService(
 	private val playerDao: PlayerDao,
 	private val boardDao: BoardDao,
 	private val dice: Dice,
+	private val computerPlayer: ComputerPlayer,
 ) {
 
 	sealed interface ReadyOutcome {
@@ -270,7 +271,7 @@ class GameSimulationService(
 				return Result.success(MovementResult(events, game))
 			}
 
-			val chosenPath = if (outgoing.size > 1) dice.choose(outgoing) else outgoing.single()
+			val chosenPath = if (outgoing.size > 1) computerPlayer.chooseBranch(outgoing) else outgoing.single()
 			remaining -= 1
 			events += applyMove(playerId, game.turnNumber, currentSpaceId, chosenPath, remaining)
 			currentSpaceId = chosenPath.toSpaceId.value
