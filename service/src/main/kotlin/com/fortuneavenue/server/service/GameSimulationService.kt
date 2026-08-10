@@ -24,7 +24,9 @@ import kotlin.uuid.Uuid
  * moving continues, while a computer player picks right away (see
  * [ComputerPlayer]) and keeps going without ever pausing. The turn ends
  * once movement reaches zero with no choice pending, at which point play
- * moves to the next player in turn order.
+ * moves to the next player in turn order -- announced with a
+ * [TurnEvent.TurnStarted] the moment that next player is a human, since
+ * nothing else is going to happen until they roll themselves.
  * The game ends once turnNumber reaches maxTurns.
  *
  * A player with no [com.fortuneavenue.server.models.player.db.Player.userId]
@@ -53,8 +55,10 @@ class GameSimulationService(
 		 * This was the last player needed -- turn order's been decided and
 		 * the game has started. [openingTurnEvents] is whatever happened
 		 * automatically because one or more computer players led that turn
-		 * order (their full turns played out, one after another) -- empty
-		 * if a human leads it off instead.
+		 * order (their full turns played out, one after another), followed
+		 * by a [TurnEvent.TurnStarted] for whichever human ends up first in
+		 * line once they're done -- or just that one event, if a human leads
+		 * turn order to begin with.
 		 */
 		data class GameStarted(
 			val turnOrder: List<Uuid>,
@@ -90,6 +94,17 @@ class GameSimulationService(
 			override val playerId: Uuid,
 			val turnNumber: Int,
 			val gameOver: Boolean,
+		) : TurnEvent
+
+		/**
+		 * It's now [playerId]'s turn, and nothing is going to happen on their
+		 * behalf -- they need to roll. Only ever emitted for a human; a
+		 * computer player's turn gets played out immediately instead (see
+		 * [DiceRolled]), so there's nothing to announce ahead of it.
+		 */
+		data class TurnStarted(
+			override val playerId: Uuid,
+			val turnNumber: Int,
 		) : TurnEvent
 	}
 
@@ -309,6 +324,14 @@ class GameSimulationService(
 	 * turn or the game ends. Used both to continue a chain after a human's
 	 * turn ends and to play out any computer players leading turn order
 	 * right when a game starts.
+	 *
+	 * The moment the chain lands on a human (including a game with only one
+	 * player, whose "next" turn is their own), it emits [TurnEvent.TurnStarted]
+	 * for them and stops there -- that human still has to roll themselves,
+	 * so unlike a computer's turn, nothing else is going to announce whose
+	 * turn it is. Clients shouldn't have to work that out themselves from
+	 * turnOrder and turnNumber, especially once anything can reorder whose
+	 * turn is next.
 	 */
 	private fun playComputerTurns(gameId: Uuid, game: Game, playersById: Map<Uuid, Player>): List<TurnEvent> {
 		val events = mutableListOf<TurnEvent>()
@@ -318,7 +341,10 @@ class GameSimulationService(
 			val turnOrder = current.turnOrder ?: break
 			val nextPlayerId = turnOrder[current.turnNumber % turnOrder.size]
 			val nextPlayer = playersById[nextPlayerId] ?: break
-			if (nextPlayer.userId != null) break
+			if (nextPlayer.userId != null) {
+				events += TurnEvent.TurnStarted(nextPlayerId, current.turnNumber)
+				break
+			}
 
 			// If a computer player's turn can't actually be played (e.g. no
 			// path forward), stop the chain here rather than failing

@@ -51,6 +51,13 @@ data class TurnEndedEvent(
 	override val type: String = "turn_ended",
 ) : GameEvent
 
+/** It's [playerId]'s turn and they need to roll -- nothing else is going to announce this for them. */
+data class TurnStartedEvent(
+	val playerId: String,
+	val turnNumber: Int,
+	override val type: String = "turn_started",
+) : GameEvent
+
 data class GameOverEvent(
 	val turnCount: Int,
 	override val type: String = "game_over",

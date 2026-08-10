@@ -31,7 +31,10 @@ private data class Connection(val gameId: Uuid, val playerId: Uuid)
  * respond with `{"type":"choose_path","spaceId":"<id>"}` to pick one and
  * keep moving. Any computer players whose turns immediately follow (once
  * the current player's turn actually ends) are played out automatically
- * too, each broadcast in turn order right after the requested one.
+ * too, each broadcast in turn order right after the requested one. The
+ * moment that chain lands on a human player, a `turn_started` event names
+ * them -- computer turns don't get one, since their own dice_rolled/
+ * player_moved events already make it obvious whose turn it was.
  * See GameSimulationService for the actual rules.
  *
  * Session bookkeeping (who's connected to which game) lives in memory on
@@ -150,6 +153,7 @@ class GameWebSocketHandler(
 			options = options.map { PathOptionPayload(it.toSpaceId.toString(), it.branchOrder) },
 		)
 		is GameSimulationService.TurnEvent.TurnEnded -> TurnEndedEvent(turnNumber = turnNumber, playerId = playerId.toString())
+		is GameSimulationService.TurnEvent.TurnStarted -> TurnStartedEvent(playerId = playerId.toString(), turnNumber = turnNumber)
 	}
 
 	private fun broadcast(gameId: Uuid, event: GameEvent) {

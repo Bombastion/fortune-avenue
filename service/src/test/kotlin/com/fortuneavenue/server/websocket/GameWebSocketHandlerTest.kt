@@ -193,6 +193,14 @@ class GameWebSocketHandlerTest : DatabaseTest() {
 		assertThat(startedEventB).isEqualTo(startedEventA)
 		val turnOrder = startedEventA["turnOrder"].map { it.asText() }
 
+		// Neither player leading turn order is a computer, so the game
+		// announces whose turn it is immediately, right after game_started.
+		val turnStartedA = clientA.nextEvent()
+		val turnStartedB = clientB.nextEvent()
+		assertThat(turnStartedA["type"].asText()).isEqualTo("turn_started")
+		assertThat(turnStartedA["playerId"].asText()).isEqualTo(turnOrder.first())
+		assertThat(turnStartedB).isEqualTo(turnStartedA)
+
 		val firstClient = if (turnOrder.first() == playerA.id) clientA else clientB
 		val secondClient = if (firstClient === clientA) clientB else clientA
 
@@ -239,6 +247,10 @@ class GameWebSocketHandlerTest : DatabaseTest() {
 		clientA.nextEvent()
 		clientB.nextEvent()
 		val startedEventA = clientA.nextEvent()
+		clientB.nextEvent()
+		// Neither player leading turn order is a computer, so the game
+		// announces whose turn it is immediately, right after game_started.
+		clientA.nextEvent()
 		clientB.nextEvent()
 		val turnOrder = startedEventA["turnOrder"].map { it.asText() }
 		val firstClient = if (turnOrder.first() == playerA.id) clientA else clientB

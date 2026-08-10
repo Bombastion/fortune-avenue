@@ -365,6 +365,7 @@ class GameSimulationServiceTest {
 			GameSimulationService.TurnEvent.DiceRolled(playerId, 1),
 			GameSimulationService.TurnEvent.Moved(playerId, 0, startSpaceId, nextSpaceId, 0),
 			GameSimulationService.TurnEvent.TurnEnded(playerId, 0, gameOver = false),
+			GameSimulationService.TurnEvent.TurnStarted(playerId, 1),
 		)
 		verify(playerDao).updatePosition(playerId, nextSpaceId)
 	}
@@ -406,6 +407,7 @@ class GameSimulationServiceTest {
 			GameSimulationService.TurnEvent.Moved(playerId, 0, spaceB, spaceC, 1),
 			GameSimulationService.TurnEvent.Moved(playerId, 0, spaceC, spaceD, 0),
 			GameSimulationService.TurnEvent.TurnEnded(playerId, 0, gameOver = false),
+			GameSimulationService.TurnEvent.TurnStarted(playerId, 1),
 		)
 		verify(playerDao).updatePosition(playerId, spaceD)
 	}
@@ -498,6 +500,7 @@ class GameSimulationServiceTest {
 			GameSimulationService.TurnEvent.Moved(playerId, 0, spaceA, spaceB, 1),
 			GameSimulationService.TurnEvent.Moved(playerId, 0, spaceB, branchD, 0),
 			GameSimulationService.TurnEvent.TurnEnded(playerId, 0, gameOver = false),
+			GameSimulationService.TurnEvent.TurnStarted(otherPlayerId, 1),
 		)
 		verify(playerDao).updatePosition(playerId, branchD)
 	}
@@ -572,7 +575,10 @@ class GameSimulationServiceTest {
 
 		val events = result.getOrNull()
 		assertThat(events).isNotNull()
-		assertThat(events!!.map { it.playerId }).containsOnly(playerId)
+		// Nothing about otherPlayerId's turn gets played -- the only event
+		// naming them is the trailing announcement that it's their turn now.
+		assertThat(events!!.dropLast(1).map { it.playerId }).containsOnly(playerId)
+		assertThat(events.last()).isEqualTo(GameSimulationService.TurnEvent.TurnStarted(otherPlayerId, 1))
 	}
 
 	@Test
@@ -745,6 +751,7 @@ class GameSimulationServiceTest {
 		assertThat(events).containsExactly(
 			GameSimulationService.TurnEvent.Moved(playerId, 0, spaceId, branchD, 0),
 			GameSimulationService.TurnEvent.TurnEnded(playerId, 0, gameOver = false),
+			GameSimulationService.TurnEvent.TurnStarted(playerId, 1),
 		)
 		verify(playerDao).updatePosition(playerId, branchD)
 	}
@@ -782,6 +789,7 @@ class GameSimulationServiceTest {
 			GameSimulationService.TurnEvent.Moved(playerId, 0, spaceId, branchC, 1),
 			GameSimulationService.TurnEvent.Moved(playerId, 0, branchC, afterBranch, 0),
 			GameSimulationService.TurnEvent.TurnEnded(playerId, 0, gameOver = false),
+			GameSimulationService.TurnEvent.TurnStarted(playerId, 1),
 		)
 	}
 
