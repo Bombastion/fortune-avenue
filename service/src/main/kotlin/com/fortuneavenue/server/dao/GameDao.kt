@@ -19,4 +19,12 @@ class GameDao {
 	fun findById(id: Uuid): Game? = transaction {
 		Game.findById(id)
 	}
+
+	fun startGame(id: Uuid, turnOrder: List<Uuid>): Game? = transaction {
+		Game.findById(id)?.apply { this.turnOrder = turnOrder }
+	}
+
+	fun advanceTurn(id: Uuid): Game? = transaction {
+		Game.findById(id)?.apply { turnNumber += 1 }
+	}
 }

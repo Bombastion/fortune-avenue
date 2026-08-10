@@ -36,10 +36,35 @@ class GameDaoTest {
 	}
 
 	@Test
-	fun `create starts a game at turn zero`() {
+	fun `create starts a game at turn zero, with no turn order yet, and a default max turns`() {
 		val created = gameDao.create(createBoardId())
 
 		assertThat(created.turnNumber).isEqualTo(0)
+		assertThat(created.turnOrder).isNull()
+		assertThat(created.maxTurns).isEqualTo(10)
+	}
+
+	@Test
+	fun `startGame sets the turn order`() {
+		val game = gameDao.create(createBoardId())
+		val order = listOf(Uuid.random(), Uuid.random())
+
+		val started = gameDao.startGame(game.id.value, order)
+
+		assertThat(started).isNotNull()
+		assertThat(started!!.turnOrder).isEqualTo(order)
+		assertThat(gameDao.findById(game.id.value)!!.turnOrder).isEqualTo(order)
+	}
+
+	@Test
+	fun `advanceTurn increments the turn number`() {
+		val game = gameDao.create(createBoardId())
+
+		val advanced = gameDao.advanceTurn(game.id.value)
+
+		assertThat(advanced).isNotNull()
+		assertThat(advanced!!.turnNumber).isEqualTo(1)
+		assertThat(gameDao.findById(game.id.value)!!.turnNumber).isEqualTo(1)
 	}
 
 	@Test

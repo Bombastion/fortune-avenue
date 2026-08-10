@@ -2,6 +2,7 @@ package com.fortuneavenue.server.dao
 
 import com.fortuneavenue.server.models.board.db.SpaceType
 import com.fortuneavenue.server.models.game.db.Game
+import com.fortuneavenue.server.models.player.db.PlayerStatus
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -47,7 +48,7 @@ class PlayerDaoTest {
 	}
 
 	@Test
-	fun `create also persists state for the new player, with no position yet`() {
+	fun `create also persists state for the new player, with no position yet and status WAITING`() {
 		val game = createGame()
 
 		val created = playerDao.create(gameId = game.id.value)
@@ -56,6 +57,7 @@ class PlayerDaoTest {
 		assertThat(state).isNotNull()
 		assertThat(state!!.playerId.value).isEqualTo(created.id.value)
 		assertThat(state.currentSpaceId).isNull()
+		assertThat(state.status).isEqualTo(PlayerStatus.WAITING)
 	}
 
 	@Test
@@ -63,6 +65,45 @@ class PlayerDaoTest {
 		val result = playerDao.findState(Uuid.random())
 
 		assertThat(result).isNull()
+	}
+
+	@Test
+	fun `updateStatus changes a player's status`() {
+		val player = playerDao.create(gameId = createGame().id.value)
+
+		val updated = playerDao.updateStatus(player.id.value, PlayerStatus.READY)
+
+		assertThat(updated).isNotNull()
+		assertThat(updated!!.status).isEqualTo(PlayerStatus.READY)
+		assertThat(playerDao.findState(player.id.value)!!.status).isEqualTo(PlayerStatus.READY)
+	}
+
+	@Test
+	fun `updateStatus returns null for a player id that does not exist`() {
+		val result = playerDao.updateStatus(Uuid.random(), PlayerStatus.READY)
+
+		assertThat(result).isNull()
+	}
+
+	@Test
+	fun `updatePosition changes a player's current space`() {
+		// current_space_id has a real FK to board_spaces, so this needs an
+		// actual space from a real board -- not just any UUID.
+		val board = boardDao.create(
+			name = "board-${Uuid.random()}",
+			spaceInputs = listOf(BoardDao.SpaceInput(SpaceType.BASIC)),
+			pathInputs = emptyList(),
+			startIndex = 0,
+		)
+		val game = gameDao.create(board.board.id.value)
+		val player = playerDao.create(gameId = game.id.value)
+		val spaceId = board.spaces.single().id.value
+
+		val updated = playerDao.updatePosition(player.id.value, spaceId)
+
+		assertThat(updated).isNotNull()
+		assertThat(updated!!.currentSpaceId?.value).isEqualTo(spaceId)
+		assertThat(playerDao.findState(player.id.value)!!.currentSpaceId?.value).isEqualTo(spaceId)
 	}
 
 	@Test
