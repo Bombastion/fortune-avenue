@@ -47,6 +47,25 @@ class PlayerDaoTest {
 	}
 
 	@Test
+	fun `create also persists state for the new player, with no position yet`() {
+		val game = createGame()
+
+		val created = playerDao.create(gameId = game.id.value)
+		val state = playerDao.findState(created.id.value)
+
+		assertThat(state).isNotNull()
+		assertThat(state!!.playerId.value).isEqualTo(created.id.value)
+		assertThat(state.currentSpaceId).isNull()
+	}
+
+	@Test
+	fun `findState returns null for a player id that does not exist`() {
+		val result = playerDao.findState(Uuid.random())
+
+		assertThat(result).isNull()
+	}
+
+	@Test
 	fun `create persists a player with no user, for a future computer opponent`() {
 		val game = createGame()
 
