@@ -17,6 +17,7 @@ import org.mockito.Mockito.mock
 import org.mockito.Mockito.verify
 import org.mockito.Mockito.verifyNoInteractions
 import org.mockito.junit.jupiter.MockitoExtension
+import java.math.BigDecimal
 
 @ExtendWith(MockitoExtension::class)
 class BoardServiceTest {
@@ -68,6 +69,60 @@ class BoardServiceTest {
 	fun `an invalid board is rejected without ever touching the DAO`() {
 		// space index 2 is declared but no path makes it reachable from start
 		val request = validRequest().copy(paths = listOf(CreateBoardPathRequest(0, 1)))
+
+		val result = boardService.createBoard(request)
+
+		assertThat(result.isFailure).isTrue()
+		assertThat(result.exceptionOrNull()).isInstanceOf(InvalidBoardException::class.java)
+		verifyNoInteractions(boardDao)
+	}
+
+	@Test
+	fun `a board with a valid SHOP space is validated then persisted via the DAO`() {
+		val request = validRequest().let { req ->
+			req.copy(
+				spaces = req.spaces.mapIndexed { index, space ->
+					if (index == 1) CreateBoardSpaceRequest(SpaceType.SHOP, baseValue = 100, basePricePercentage = BigDecimal("0.1000")) else space
+				},
+			)
+		}
+		val expectedGraph = mock(BoardGraph::class.java)
+
+		val expectedSpaceInputs = request.spaces.map {
+			BoardDao.SpaceInput(spaceType = it.spaceType, baseValue = it.baseValue, basePricePercentage = it.basePricePercentage)
+		}
+		val expectedPathInputs = request.paths.map { BoardDao.PathInput(it.from, it.to, it.branchOrder) }
+
+		given(
+			boardDao.create(request.name, expectedSpaceInputs, expectedPathInputs, request.startSpaceIndex),
+		).willReturn(expectedGraph)
+
+		val result = boardService.createBoard(request)
+
+		assertThat(result.isSuccess).isTrue()
+		assertThat(result.getOrNull()).isSameAs(expectedGraph)
+	}
+
+	@Test
+	fun `a SHOP space missing required fields is rejected without ever touching the DAO`() {
+		val request = validRequest().let { req ->
+			req.copy(spaces = req.spaces.mapIndexed { index, space -> if (index == 1) CreateBoardSpaceRequest(SpaceType.SHOP) else space })
+		}
+
+		val result = boardService.createBoard(request)
+
+		assertThat(result.isFailure).isTrue()
+		assertThat(result.exceptionOrNull()).isInstanceOf(InvalidBoardException::class.java)
+		verifyNoInteractions(boardDao)
+	}
+
+	@Test
+	fun `a non-SHOP space carrying shop fields is rejected without ever touching the DAO`() {
+		val request = validRequest().let { req ->
+			req.copy(
+				spaces = req.spaces.mapIndexed { index, space -> if (index == 0) space.copy(baseValue = 100) else space },
+			)
+		}
 
 		val result = boardService.createBoard(request)
 

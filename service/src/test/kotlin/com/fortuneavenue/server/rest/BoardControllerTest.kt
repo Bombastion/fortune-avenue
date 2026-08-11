@@ -21,6 +21,7 @@ import org.springframework.core.ParameterizedTypeReference
 import org.springframework.http.HttpMethod
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
+import java.math.BigDecimal
 import kotlin.uuid.Uuid
 
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
@@ -64,6 +65,45 @@ class BoardControllerTest : DatabaseTest() {
 		// space index 2 is declared but nothing makes it reachable from start
 		val request = validRequest("invalid-${Uuid.random()}").copy(
 			paths = listOf(CreateBoardPathRequest(0, 1)),
+		)
+
+		val response = restTemplate.postForEntity<ErrorResponse>("/boards", request)
+
+		assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
+		assertThat(response.body?.message).isNotBlank()
+	}
+
+	@Test
+	fun `creating a board with a SHOP space returns the shop fields as JSON`() {
+		val request = validRequest("shop-${Uuid.random()}").copy(
+			spaces = listOf(
+				CreateBoardSpaceRequest(SpaceType.SHOP, baseValue = 250, basePricePercentage = BigDecimal("0.1500")),
+				CreateBoardSpaceRequest(SpaceType.BASIC),
+				CreateBoardSpaceRequest(SpaceType.BASIC),
+			),
+		)
+
+		val response = restTemplate.postForEntity<BoardResponse>("/boards", request)
+
+		assertThat(response.statusCode).isEqualTo(HttpStatus.CREATED)
+		val body = response.body!!
+		val shopSpace = body.spaces.first { it.spaceType == SpaceType.SHOP }
+		assertThat(shopSpace.baseValue).isEqualTo(250)
+		assertThat(shopSpace.basePricePercentage).isEqualByComparingTo(BigDecimal("0.1500"))
+
+		val basicSpace = body.spaces.first { it.spaceType == SpaceType.BASIC }
+		assertThat(basicSpace.baseValue).isNull()
+		assertThat(basicSpace.basePricePercentage).isNull()
+	}
+
+	@Test
+	fun `creating a board with a SHOP space missing required fields returns 400`() {
+		val request = validRequest("shop-invalid-${Uuid.random()}").copy(
+			spaces = listOf(
+				CreateBoardSpaceRequest(SpaceType.SHOP),
+				CreateBoardSpaceRequest(SpaceType.BASIC),
+				CreateBoardSpaceRequest(SpaceType.BASIC),
+			),
 		)
 
 		val response = restTemplate.postForEntity<ErrorResponse>("/boards", request)

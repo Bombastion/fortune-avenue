@@ -7,18 +7,25 @@ import com.fortuneavenue.server.models.board.db.BoardPathsTable
 import com.fortuneavenue.server.models.board.db.BoardSpace
 import com.fortuneavenue.server.models.board.db.BoardSpacesTable
 import com.fortuneavenue.server.models.board.db.BoardsTable
+import com.fortuneavenue.server.models.board.db.ShopInformation
+import com.fortuneavenue.server.models.board.db.ShopInformationTable
 import com.fortuneavenue.server.models.board.db.SpaceType
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.springframework.stereotype.Repository
+import java.math.BigDecimal
 import kotlin.uuid.Uuid
 
 @Repository
 class BoardDao {
 
-	data class SpaceInput(val spaceType: SpaceType)
+	data class SpaceInput(
+		val spaceType: SpaceType,
+		val baseValue: Int? = null,
+		val basePricePercentage: BigDecimal? = null,
+	)
 	data class PathInput(val fromIndex: Int, val toIndex: Int, val branchOrder: Int)
 
 	fun create(
@@ -54,15 +61,33 @@ class BoardDao {
 			}
 		}
 
-		BoardGraph(board = board, spaces = spaces, paths = paths)
+		// Assumes the caller (BoardService, via ShopSpaceValidator) already checked
+		// that every SHOP space input carries a baseValue/basePricePercentage.
+		val shopInformation = spaceInputs.zip(spaces).mapNotNull { (input, space) ->
+			if (input.spaceType != SpaceType.SHOP) return@mapNotNull null
+
+			ShopInformation.new {
+				boardId = board.id
+				spaceId = space.id
+				baseValue = requireNotNull(input.baseValue) {
+					"SHOP space at ${space.id.value} is missing baseValue."
+				}
+				basePricePercentage = requireNotNull(input.basePricePercentage) {
+					"SHOP space at ${space.id.value} is missing basePricePercentage."
+				}
+			}
+		}
+
+		BoardGraph(board = board, spaces = spaces, paths = paths, shopInformation = shopInformation)
 	}
 
 	fun findById(id: Uuid): BoardGraph? = transaction {
 		val board = Board.findById(id) ?: return@transaction null
 		val spaces = BoardSpace.find { BoardSpacesTable.boardId eq board.id }.toList()
 		val paths = BoardPath.find { BoardPathsTable.boardId eq board.id }.toList()
+		val shopInformation = ShopInformation.find { ShopInformationTable.boardId eq board.id }.toList()
 
-		BoardGraph(board = board, spaces = spaces, paths = paths)
+		BoardGraph(board = board, spaces = spaces, paths = paths, shopInformation = shopInformation)
 	}
 
 	/** Boards are sorted by name until we add sort criteria. */
@@ -77,7 +102,8 @@ class BoardDao {
 		Board.wrapRows(query).map { board ->
 			val spaces = BoardSpace.find { BoardSpacesTable.boardId eq board.id }.toList()
 			val paths = BoardPath.find { BoardPathsTable.boardId eq board.id }.toList()
-			BoardGraph(board = board, spaces = spaces, paths = paths)
+			val shopInformation = ShopInformation.find { ShopInformationTable.boardId eq board.id }.toList()
+			BoardGraph(board = board, spaces = spaces, paths = paths, shopInformation = shopInformation)
 		}
 	}
 
