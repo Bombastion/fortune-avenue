@@ -16,11 +16,13 @@ class BoardService(
 	fun createBoard(request: CreateBoardRequest): Result<BoardGraph> {
 		val edges = request.paths.map { BoardGraphValidator.Edge(from = it.from, to = it.to) }
 
-		val errors = ShopSpaceValidator.validate(request.spaces) + BoardGraphValidator.validate(
-			spaceCount = request.spaces.size,
-			edges = edges,
-			start = request.startSpaceIndex,
-		)
+		val errors = ShopSpaceValidator.validate(request.spaces) +
+			DistrictValidator.validate(request) +
+			BoardGraphValidator.validate(
+				spaceCount = request.spaces.size,
+				edges = edges,
+				start = request.startSpaceIndex,
+			)
 
 		if (errors.isNotEmpty()) {
 			return Result.failure(InvalidBoardException(errors.joinToString(" ")))
@@ -33,10 +35,12 @@ class BoardService(
 					spaceType = it.spaceType,
 					baseValue = it.baseValue,
 					basePricePercentage = it.basePricePercentage,
+					districtIndex = it.districtIndex,
 				)
 			},
 			pathInputs = request.paths.map { BoardDao.PathInput(it.from, it.to, it.branchOrder) },
 			startIndex = request.startSpaceIndex,
+			districtInputs = request.districts.map { BoardDao.DistrictInput(it.name, it.colorHex) },
 		)
 
 		return Result.success(graph)

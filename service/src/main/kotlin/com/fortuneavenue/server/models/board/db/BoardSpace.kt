@@ -10,4 +10,5 @@ class BoardSpace(id: EntityID<Uuid>) : UuidEntity(id) {
 
 	var boardId by BoardSpacesTable.boardId
 	var spaceType by BoardSpacesTable.spaceType
+	var districtId by BoardSpacesTable.districtId
 }

@@ -6,6 +6,7 @@ import com.fortuneavenue.server.models.board.db.SpaceType
 import com.fortuneavenue.server.models.board.rest.CreateBoardPathRequest
 import com.fortuneavenue.server.models.board.rest.CreateBoardRequest
 import com.fortuneavenue.server.models.board.rest.CreateBoardSpaceRequest
+import com.fortuneavenue.server.models.board.rest.CreateDistrictRequest
 import com.fortuneavenue.server.models.common.rest.SortDirection
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
@@ -122,6 +123,63 @@ class BoardServiceTest {
 			req.copy(
 				spaces = req.spaces.mapIndexed { index, space -> if (index == 0) space.copy(baseValue = 100) else space },
 			)
+		}
+
+		val result = boardService.createBoard(request)
+
+		assertThat(result.isFailure).isTrue()
+		assertThat(result.exceptionOrNull()).isInstanceOf(InvalidBoardException::class.java)
+		verifyNoInteractions(boardDao)
+	}
+
+	// --- districts ---
+
+	@Test
+	fun `a board with a valid district is validated then persisted via the DAO`() {
+		val request = validRequest().let { req ->
+			req.copy(
+				districts = listOf(CreateDistrictRequest("Red", "FF0000")),
+				spaces = req.spaces.mapIndexed { index, space -> if (index == 0) space.copy(districtIndex = 0) else space },
+			)
+		}
+		val expectedGraph = mock(BoardGraph::class.java)
+
+		val expectedSpaceInputs = request.spaces.map {
+			BoardDao.SpaceInput(
+				spaceType = it.spaceType,
+				baseValue = it.baseValue,
+				basePricePercentage = it.basePricePercentage,
+				districtIndex = it.districtIndex,
+			)
+		}
+		val expectedPathInputs = request.paths.map { BoardDao.PathInput(it.from, it.to, it.branchOrder) }
+		val expectedDistrictInputs = request.districts.map { BoardDao.DistrictInput(it.name, it.colorHex) }
+
+		given(
+			boardDao.create(request.name, expectedSpaceInputs, expectedPathInputs, request.startSpaceIndex, expectedDistrictInputs),
+		).willReturn(expectedGraph)
+
+		val result = boardService.createBoard(request)
+
+		assertThat(result.isSuccess).isTrue()
+		assertThat(result.getOrNull()).isSameAs(expectedGraph)
+	}
+
+	@Test
+	fun `a district with a malformed colorHex is rejected without ever touching the DAO`() {
+		val request = validRequest().copy(districts = listOf(CreateDistrictRequest("Red", "nope")))
+
+		val result = boardService.createBoard(request)
+
+		assertThat(result.isFailure).isTrue()
+		assertThat(result.exceptionOrNull()).isInstanceOf(InvalidBoardException::class.java)
+		verifyNoInteractions(boardDao)
+	}
+
+	@Test
+	fun `a space with an out-of-range districtIndex is rejected without ever touching the DAO`() {
+		val request = validRequest().let { req ->
+			req.copy(spaces = req.spaces.mapIndexed { index, space -> if (index == 0) space.copy(districtIndex = 0) else space })
 		}
 
 		val result = boardService.createBoard(request)

@@ -9,6 +9,7 @@ data class BoardSpaceResponse(
 	val spaceType: SpaceType,
 	val baseValue: Int? = null,
 	val basePricePercentage: BigDecimal? = null,
+	val districtId: String? = null,
 )
 
 data class BoardPathResponse(
@@ -17,12 +18,19 @@ data class BoardPathResponse(
 	val branchOrder: Int,
 )
 
+data class DistrictResponse(
+	val id: String,
+	val name: String,
+	val colorHex: String,
+)
+
 data class BoardResponse(
 	val id: String,
 	val name: String,
 	val startSpaceId: String,
 	val spaces: List<BoardSpaceResponse>,
 	val paths: List<BoardPathResponse>,
+	val districts: List<DistrictResponse> = emptyList(),
 )
 
 fun BoardGraph.toResponse(): BoardResponse {
@@ -41,6 +49,7 @@ fun BoardGraph.toResponse(): BoardResponse {
 				spaceType = space.spaceType,
 				baseValue = shop?.baseValue,
 				basePricePercentage = shop?.basePricePercentage,
+				districtId = space.districtId?.value?.toString(),
 			)
 		},
 		paths = paths.map {
@@ -49,6 +58,9 @@ fun BoardGraph.toResponse(): BoardResponse {
 				to = it.toSpaceId.value.toString(),
 				branchOrder = it.branchOrder,
 			)
+		},
+		districts = districts.map {
+			DistrictResponse(id = it.id.value.toString(), name = it.name, colorHex = it.colorHex)
 		},
 	)
 }

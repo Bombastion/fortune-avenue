@@ -82,6 +82,40 @@ class BoardDaoTest : DatabaseTest() {
 	}
 
 	@Test
+	fun `create persists districts and associates spaces with them via districtIndex`() {
+		val districts = listOf(BoardDao.DistrictInput("Red", "FF0000"))
+		val spaces = listOf(
+			BoardDao.SpaceInput(SpaceType.BASIC, districtIndex = 0),
+			BoardDao.SpaceInput(SpaceType.BASIC),
+		)
+		val paths = listOf(
+			BoardDao.PathInput(0, 1, 0),
+			BoardDao.PathInput(1, 0, 0),
+		)
+
+		val created = boardDao.create(
+			name = "district-board-${Uuid.random()}",
+			spaceInputs = spaces,
+			pathInputs = paths,
+			startIndex = 0,
+			districtInputs = districts,
+		)
+
+		assertThat(created.districts).hasSize(1)
+		val district = created.districts.single()
+		assertThat(district.name).isEqualTo("Red")
+		assertThat(district.colorHex).isEqualTo("FF0000")
+		assertThat(created.spaces[0].districtId).isEqualTo(district.id)
+		assertThat(created.spaces[1].districtId).isNull()
+
+		val found = boardDao.findById(created.board.id.value)
+
+		assertThat(found).isNotNull()
+		assertThat(found!!.districts).hasSize(1)
+		assertThat(found.spaces.first { it.id == created.spaces[0].id }.districtId).isEqualTo(district.id)
+	}
+
+	@Test
 	fun `findById returns null for an id that does not exist`() {
 		val result = boardDao.findById(Uuid.random())
 
