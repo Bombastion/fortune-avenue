@@ -33,16 +33,19 @@ curl -s -X POST http://localhost:8080/boards \
   -d '{
     "name": "Test Board",
     "spaces": [
-      { "spaceType": "BASIC" },
-      { "spaceType": "BASIC" },
-      { "spaceType": "BASIC" }
+      { "spaceType": "BASIC", "districtIndex": 0 },
+      { "spaceType": "SHOP", "baseValue": 300, "basePricePercentage": 0.2500 },
+      { "spaceType": "BASIC", "districtIndex": 0 }
     ],
     "paths": [
       { "from": 0, "to": 1, "branchOrder": 0 },
       { "from": 1, "to": 2, "branchOrder": 0 },
       { "from": 2, "to": 0, "branchOrder": 0 }
     ],
-    "startSpaceIndex": 0
+    "startSpaceIndex": 0,
+    "districts": [
+      { "name": "Blue District", "colorHex": "1E90FF" }
+    ]
   }'
 
 # Create a game on that board -> save the returned id as GAME_ID
