@@ -6,6 +6,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
+import java.math.BigDecimal
 import kotlin.uuid.Uuid
 
 @SpringBootTest
@@ -46,6 +47,72 @@ class BoardDaoTest : DatabaseTest() {
 			.containsExactlyInAnyOrderElementsOf(created.spaces.map { it.id.value })
 		assertThat(found.paths.map { it.id.value })
 			.containsExactlyInAnyOrderElementsOf(created.paths.map { it.id.value })
+	}
+
+	@Test
+	fun `create persists shop information for SHOP spaces only, and findById returns it`() {
+		val spaces = listOf(
+			BoardDao.SpaceInput(SpaceType.BASIC),
+			BoardDao.SpaceInput(SpaceType.SHOP, baseValue = 500, basePricePercentage = BigDecimal("0.2500")),
+		)
+		val paths = listOf(
+			BoardDao.PathInput(0, 1, 0),
+			BoardDao.PathInput(1, 0, 0),
+		)
+
+		val created = boardDao.create(
+			name = "shop-board-${Uuid.random()}",
+			spaceInputs = spaces,
+			pathInputs = paths,
+			startIndex = 0,
+		)
+
+		assertThat(created.shopInformation).hasSize(1)
+		val shopSpaceId = created.spaces[1].id
+		val createdShopInfo = created.shopInformation.single()
+		assertThat(createdShopInfo.spaceId).isEqualTo(shopSpaceId)
+		assertThat(createdShopInfo.baseValue).isEqualTo(500)
+		assertThat(createdShopInfo.basePricePercentage).isEqualByComparingTo(BigDecimal("0.2500"))
+
+		val found = boardDao.findById(created.board.id.value)
+
+		assertThat(found).isNotNull()
+		assertThat(found!!.shopInformation).hasSize(1)
+		assertThat(found.shopInformation.single().spaceId).isEqualTo(shopSpaceId)
+	}
+
+	@Test
+	fun `create persists districts and associates spaces with them via districtIndex`() {
+		val districts = listOf(BoardDao.DistrictInput("Red", "FF0000"))
+		val spaces = listOf(
+			BoardDao.SpaceInput(SpaceType.BASIC, districtIndex = 0),
+			BoardDao.SpaceInput(SpaceType.BASIC),
+		)
+		val paths = listOf(
+			BoardDao.PathInput(0, 1, 0),
+			BoardDao.PathInput(1, 0, 0),
+		)
+
+		val created = boardDao.create(
+			name = "district-board-${Uuid.random()}",
+			spaceInputs = spaces,
+			pathInputs = paths,
+			startIndex = 0,
+			districtInputs = districts,
+		)
+
+		assertThat(created.districts).hasSize(1)
+		val district = created.districts.single()
+		assertThat(district.name).isEqualTo("Red")
+		assertThat(district.colorHex).isEqualTo("FF0000")
+		assertThat(created.spaces[0].districtId).isEqualTo(district.id)
+		assertThat(created.spaces[1].districtId).isNull()
+
+		val found = boardDao.findById(created.board.id.value)
+
+		assertThat(found).isNotNull()
+		assertThat(found!!.districts).hasSize(1)
+		assertThat(found.spaces.first { it.id == created.spaces[0].id }.districtId).isEqualTo(district.id)
 	}
 
 	@Test

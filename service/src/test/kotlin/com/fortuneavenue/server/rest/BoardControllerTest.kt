@@ -6,6 +6,7 @@ import com.fortuneavenue.server.models.board.rest.BoardResponse
 import com.fortuneavenue.server.models.board.rest.CreateBoardPathRequest
 import com.fortuneavenue.server.models.board.rest.CreateBoardRequest
 import com.fortuneavenue.server.models.board.rest.CreateBoardSpaceRequest
+import com.fortuneavenue.server.models.board.rest.CreateDistrictRequest
 import com.fortuneavenue.server.models.common.rest.ErrorResponse
 import com.fortuneavenue.server.models.common.rest.Page
 import com.fortuneavenue.server.models.common.rest.SortDirection
@@ -21,6 +22,7 @@ import org.springframework.core.ParameterizedTypeReference
 import org.springframework.http.HttpMethod
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
+import java.math.BigDecimal
 import kotlin.uuid.Uuid
 
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
@@ -64,6 +66,98 @@ class BoardControllerTest : DatabaseTest() {
 		// space index 2 is declared but nothing makes it reachable from start
 		val request = validRequest("invalid-${Uuid.random()}").copy(
 			paths = listOf(CreateBoardPathRequest(0, 1)),
+		)
+
+		val response = restTemplate.postForEntity<ErrorResponse>("/boards", request)
+
+		assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
+		assertThat(response.body?.message).isNotBlank()
+	}
+
+	@Test
+	fun `creating a board with a SHOP space returns the shop fields as JSON`() {
+		val request = validRequest("shop-${Uuid.random()}").copy(
+			spaces = listOf(
+				CreateBoardSpaceRequest(SpaceType.SHOP, baseValue = 250, basePricePercentage = BigDecimal("0.1500")),
+				CreateBoardSpaceRequest(SpaceType.BASIC),
+				CreateBoardSpaceRequest(SpaceType.BASIC),
+			),
+		)
+
+		val response = restTemplate.postForEntity<BoardResponse>("/boards", request)
+
+		assertThat(response.statusCode).isEqualTo(HttpStatus.CREATED)
+		val body = response.body!!
+		val shopSpace = body.spaces.first { it.spaceType == SpaceType.SHOP }
+		assertThat(shopSpace.baseValue).isEqualTo(250)
+		assertThat(shopSpace.basePricePercentage).isEqualByComparingTo(BigDecimal("0.1500"))
+
+		val basicSpace = body.spaces.first { it.spaceType == SpaceType.BASIC }
+		assertThat(basicSpace.baseValue).isNull()
+		assertThat(basicSpace.basePricePercentage).isNull()
+	}
+
+	@Test
+	fun `creating a board with a SHOP space missing required fields returns 400`() {
+		val request = validRequest("shop-invalid-${Uuid.random()}").copy(
+			spaces = listOf(
+				CreateBoardSpaceRequest(SpaceType.SHOP),
+				CreateBoardSpaceRequest(SpaceType.BASIC),
+				CreateBoardSpaceRequest(SpaceType.BASIC),
+			),
+		)
+
+		val response = restTemplate.postForEntity<ErrorResponse>("/boards", request)
+
+		assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
+		assertThat(response.body?.message).isNotBlank()
+	}
+
+	@Test
+	fun `creating a board with a district returns it and links referencing spaces to it`() {
+		val request = validRequest("district-${Uuid.random()}").copy(
+			districts = listOf(CreateDistrictRequest("Red", "FF0000")),
+			spaces = listOf(
+				CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0),
+				CreateBoardSpaceRequest(SpaceType.BASIC),
+				CreateBoardSpaceRequest(SpaceType.BASIC),
+			),
+		)
+
+		val response = restTemplate.postForEntity<BoardResponse>("/boards", request)
+
+		assertThat(response.statusCode).isEqualTo(HttpStatus.CREATED)
+		val body = response.body!!
+		assertThat(body.districts).hasSize(1)
+		val district = body.districts.single()
+		assertThat(district.name).isEqualTo("Red")
+		assertThat(district.colorHex).isEqualTo("FF0000")
+
+		val linkedSpace = body.spaces.first { it.districtId != null }
+		assertThat(linkedSpace.districtId).isEqualTo(district.id)
+		assertThat(body.spaces.count { it.districtId == null }).isEqualTo(2)
+	}
+
+	@Test
+	fun `creating a board with a district that has an invalid colorHex returns 400`() {
+		val request = validRequest("district-invalid-${Uuid.random()}").copy(
+			districts = listOf(CreateDistrictRequest("Red", "not-a-color")),
+		)
+
+		val response = restTemplate.postForEntity<ErrorResponse>("/boards", request)
+
+		assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
+		assertThat(response.body?.message).isNotBlank()
+	}
+
+	@Test
+	fun `creating a board with a space referencing an out-of-range districtIndex returns 400`() {
+		val request = validRequest("district-oor-${Uuid.random()}").copy(
+			spaces = listOf(
+				CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0),
+				CreateBoardSpaceRequest(SpaceType.BASIC),
+				CreateBoardSpaceRequest(SpaceType.BASIC),
+			),
 		)
 
 		val response = restTemplate.postForEntity<ErrorResponse>("/boards", request)

@@ -7,25 +7,37 @@ import com.fortuneavenue.server.models.board.db.BoardPathsTable
 import com.fortuneavenue.server.models.board.db.BoardSpace
 import com.fortuneavenue.server.models.board.db.BoardSpacesTable
 import com.fortuneavenue.server.models.board.db.BoardsTable
+import com.fortuneavenue.server.models.board.db.District
+import com.fortuneavenue.server.models.board.db.DistrictsTable
+import com.fortuneavenue.server.models.board.db.ShopInformation
+import com.fortuneavenue.server.models.board.db.ShopInformationTable
 import com.fortuneavenue.server.models.board.db.SpaceType
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.springframework.stereotype.Repository
+import java.math.BigDecimal
 import kotlin.uuid.Uuid
 
 @Repository
 class BoardDao {
 
-	data class SpaceInput(val spaceType: SpaceType)
+	data class SpaceInput(
+		val spaceType: SpaceType,
+		val baseValue: Int? = null,
+		val basePricePercentage: BigDecimal? = null,
+		val districtIndex: Int? = null,
+	)
 	data class PathInput(val fromIndex: Int, val toIndex: Int, val branchOrder: Int)
+	data class DistrictInput(val name: String, val colorHex: String)
 
 	fun create(
 		name: String,
 		spaceInputs: List<SpaceInput>,
 		pathInputs: List<PathInput>,
 		startIndex: Int,
+		districtInputs: List<DistrictInput> = emptyList(),
 	): BoardGraph = transaction {
 		// start_space_id is a plain uuid column, not a typed reference() (see the
 		// comment on BoardsTable), but Board requires it to exist. We do some
@@ -34,10 +46,25 @@ class BoardDao {
 		val board = Board.new { this.name = name }
 		board.flush()
 
+		// Districts have to exist (and be flushed to the DB) before spaces can
+		// reference them, same reasoning as the flush below for spaces/paths.
+		val districts = districtInputs.map { input ->
+			District.new {
+				boardId = board.id
+				// `this.` is required here: create()'s own `name` parameter would
+				// otherwise shadow the entity's `name` property (see the similar
+				// `this.name = name` above for Board.new).
+				this.name = input.name
+				colorHex = input.colorHex
+			}
+		}
+		districts.firstOrNull()?.flush()
+
 		val spaces = spaceInputs.map { input ->
 			BoardSpace.new {
 				boardId = board.id
 				spaceType = input.spaceType
+				districtId = input.districtIndex?.let { districts[it].id }
 			}
 		}
 		spaces.firstOrNull()?.flush()
@@ -54,15 +81,34 @@ class BoardDao {
 			}
 		}
 
-		BoardGraph(board = board, spaces = spaces, paths = paths)
+		// Assumes the caller (BoardService, via ShopSpaceValidator) already checked
+		// that every SHOP space input carries a baseValue/basePricePercentage.
+		val shopInformation = spaceInputs.zip(spaces).mapNotNull { (input, space) ->
+			if (input.spaceType != SpaceType.SHOP) return@mapNotNull null
+
+			ShopInformation.new {
+				boardId = board.id
+				spaceId = space.id
+				baseValue = requireNotNull(input.baseValue) {
+					"SHOP space at ${space.id.value} is missing baseValue."
+				}
+				basePricePercentage = requireNotNull(input.basePricePercentage) {
+					"SHOP space at ${space.id.value} is missing basePricePercentage."
+				}
+			}
+		}
+
+		BoardGraph(board = board, spaces = spaces, paths = paths, shopInformation = shopInformation, districts = districts)
 	}
 
 	fun findById(id: Uuid): BoardGraph? = transaction {
 		val board = Board.findById(id) ?: return@transaction null
 		val spaces = BoardSpace.find { BoardSpacesTable.boardId eq board.id }.toList()
 		val paths = BoardPath.find { BoardPathsTable.boardId eq board.id }.toList()
+		val shopInformation = ShopInformation.find { ShopInformationTable.boardId eq board.id }.toList()
+		val districts = District.find { DistrictsTable.boardId eq board.id }.toList()
 
-		BoardGraph(board = board, spaces = spaces, paths = paths)
+		BoardGraph(board = board, spaces = spaces, paths = paths, shopInformation = shopInformation, districts = districts)
 	}
 
 	/** Boards are sorted by name until we add sort criteria. */
@@ -77,7 +123,9 @@ class BoardDao {
 		Board.wrapRows(query).map { board ->
 			val spaces = BoardSpace.find { BoardSpacesTable.boardId eq board.id }.toList()
 			val paths = BoardPath.find { BoardPathsTable.boardId eq board.id }.toList()
-			BoardGraph(board = board, spaces = spaces, paths = paths)
+			val shopInformation = ShopInformation.find { ShopInformationTable.boardId eq board.id }.toList()
+			val districts = District.find { DistrictsTable.boardId eq board.id }.toList()
+			BoardGraph(board = board, spaces = spaces, paths = paths, shopInformation = shopInformation, districts = districts)
 		}
 	}
 
