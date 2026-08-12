@@ -203,7 +203,7 @@ class GameWebSocketHandlerTest : DatabaseTest() {
 	 * A loop of two spaces: the start, and a single SHOP with only one path out of either --
 	 * so a roll of 1 from the start always lands on the shop, with nothing to branch on.
 	 */
-	private fun createShopBoard(baseValue: Int = 300): BoardResponse = restTemplate.postForEntity<BoardResponse>(
+	private fun createShopBoard(baseValue: Int = 300, startingGold: Int = 1000): BoardResponse = restTemplate.postForEntity<BoardResponse>(
 		"/boards",
 		CreateBoardRequest(
 			name = "shop-${Uuid.random()}",
@@ -216,7 +216,7 @@ class GameWebSocketHandlerTest : DatabaseTest() {
 				CreateBoardPathRequest(1, 0),
 			),
 			startSpaceIndex = 0,
-			startingGold = 1000,
+			startingGold = startingGold,
 		),
 	).body!!
 
@@ -486,6 +486,42 @@ class GameWebSocketHandlerTest : DatabaseTest() {
 
 		val playerId = Uuid.parse(player.id)
 		assertThat(playerDao.findState(playerId)!!.currentGold).isEqualTo(board.startingGold)
+		val shop = gameShopInformationDao.findByGameAndSpace(Uuid.parse(game.id), Uuid.parse(shopSpaceId))
+		assertThat(shop?.ownerId).isNull()
+	}
+
+	@Test
+	fun `buy_shop fails when the player can't afford the price, leaving the decision pending`() {
+		val board = createShopBoard(baseValue = 300, startingGold = 50)
+		val game = createGame(board)
+		val player = addHumanPlayer(game.id)
+		val client = RecordingClient().also { it.connect(game.id, player.id) }
+		assertThat(client.nextEvent()["type"].asText()).isEqualTo("connected")
+
+		client.send("ready")
+		client.nextEvent() // player_ready
+		client.nextEvent() // game_started
+		client.nextEvent() // turn_started
+
+		(dice as QueuedDice).enqueue(1)
+		client.send("roll_dice")
+		client.nextEvent() // dice_rolled
+		client.nextEvent() // player_moved
+		val pauseEvent = client.nextEvent()
+		assertThat(pauseEvent["type"].asText()).isEqualTo("shop_purchase_available")
+		val shopSpaceId = pauseEvent["spaceId"].asText()
+
+		client.send("buy_shop")
+		assertThat(client.nextEvent()["type"].asText()).isEqualTo("error")
+
+		// The decision is still pending -- declining now (rather than retrying buy_shop) is what
+		// finally ends the turn.
+		client.send("decline_shop")
+		assertThat(client.nextEvent()["type"].asText()).isEqualTo("turn_ended")
+		assertThat(client.nextEvent()["type"].asText()).isEqualTo("turn_started")
+
+		val playerId = Uuid.parse(player.id)
+		assertThat(playerDao.findState(playerId)!!.currentGold).isEqualTo(50)
 		val shop = gameShopInformationDao.findByGameAndSpace(Uuid.parse(game.id), Uuid.parse(shopSpaceId))
 		assertThat(shop?.ownerId).isNull()
 	}

@@ -73,10 +73,12 @@ class GameSimulationServiceTest {
 		return player
 	}
 
-	private fun mockPlayerState(status: PlayerStatus, currentSpaceId: Uuid? = null): PlayerState {
+	/** [currentGold] defaults generously high so existing tests don't have to think about affordability unless they're actually testing it. */
+	private fun mockPlayerState(status: PlayerStatus, currentSpaceId: Uuid? = null, currentGold: Int = 1000): PlayerState {
 		val state = mock(PlayerState::class.java)
 		lenient().`when`(state.status).thenReturn(status)
 		lenient().`when`(state.currentSpaceId).thenReturn(currentSpaceId?.let { EntityID(it, BoardSpacesTable) })
+		lenient().`when`(state.currentGold).thenReturn(currentGold)
 		return state
 	}
 
@@ -991,6 +993,27 @@ class GameSimulationServiceTest {
 	}
 
 	@Test
+	fun `buyShop fails when the player can't afford the shop's price, leaving it unowned and their gold untouched`() {
+		val playerId = Uuid.random()
+		val spaceId = Uuid.random()
+		val game = mockGame(turnOrder = listOf(playerId), turnNumber = 0, currentMovementPoints = 0)
+		val player = mockPlayer(playerId)
+		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceId, currentGold = 50)
+		val shop = mockShop(spaceId = spaceId, currentValue = 150)
+		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
+		given(playerDao.findState(playerId)).willReturn(playerState)
+		given(gameShopInformationDao.findByGameAndSpace(gameId, spaceId)).willReturn(shop)
+
+		val result = service.buyShop(gameId, playerId)
+
+		assertThat(result.exceptionOrNull()).isInstanceOf(InvalidTurnException::class.java)
+		verify(gameShopInformationDao, never()).setOwner(shop.id.value, playerId)
+		verify(playerDao, never()).adjustGold(playerId, -150)
+		verify(gameDao, never()).advanceTurn(gameId)
+	}
+
+	@Test
 	fun `buyShop recalculates every owned shop in the district once the player's count there reaches 2`() {
 		val playerId = Uuid.random()
 		val spaceId = Uuid.random()
@@ -1152,6 +1175,43 @@ class GameSimulationServiceTest {
 			GameSimulationService.TurnEvent.TurnEnded(computerId, 0, gameOver = false),
 			GameSimulationService.TurnEvent.TurnStarted(otherPlayerId, 1),
 		)
+		verify(gameShopInformationDao, never()).setOwner(shop.id.value, computerId)
+	}
+
+	@Test
+	fun `a computer player skips buying a shop it can't afford, ending the turn normally without ever weighing in`() {
+		val computerId = Uuid.random()
+		val otherPlayerId = Uuid.random()
+		val spaceId = Uuid.random()
+		val shopSpaceId = Uuid.random()
+		val turnOrder = listOf(computerId, otherPlayerId)
+		val game = mockGame(turnOrder = turnOrder, turnNumber = 0, maxTurns = 10)
+		val computer = mockPlayer(computerId, userId = null)
+		val otherPlayer = mockPlayer(otherPlayerId)
+		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceId, currentGold = 50)
+		val board = mockBoard()
+		val boardGraph = BoardGraph(board = board, spaces = emptyList(), paths = listOf(mockPath(spaceId, shopSpaceId, 0)))
+		val shop = mockShop(spaceId = shopSpaceId, currentValue = 100)
+		val advancedGame = mockGame(turnOrder = turnOrder, turnNumber = 1)
+		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(computer, otherPlayer))
+		given(playerDao.findState(computerId)).willReturn(playerState)
+		given(boardDao.findById(boardId)).willReturn(boardGraph)
+		given(dice.roll()).willReturn(1)
+		given(gameShopInformationDao.findByGameAndSpace(gameId, shopSpaceId)).willReturn(shop)
+		given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
+
+		val result = service.rollDice(gameId, computerId)
+
+		assertThat(result.getOrNull()).containsExactly(
+			GameSimulationService.TurnEvent.DiceRolled(computerId, 1),
+			GameSimulationService.TurnEvent.Moved(computerId, 0, spaceId, shopSpaceId, 0),
+			GameSimulationService.TurnEvent.TurnEnded(computerId, 0, gameOver = false),
+			GameSimulationService.TurnEvent.TurnStarted(otherPlayerId, 1),
+		)
+		// Affordability is checked before ComputerPlayer ever gets a say -- there's nothing to
+		// decide once the shop is out of reach.
+		verify(computerPlayer, never()).shouldBuyShop(shop)
 		verify(gameShopInformationDao, never()).setOwner(shop.id.value, computerId)
 	}
 }

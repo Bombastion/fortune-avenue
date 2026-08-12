@@ -31,10 +31,12 @@ private data class Connection(val gameId: Uuid, val playerId: Uuid)
  * respond with `{"type":"choose_path","spaceId":"<id>"}` to pick one and
  * keep moving. If movement instead runs out on an unowned shop, it pauses
  * there too with a `shop_purchase_available` event naming the price --
- * respond with `{"type":"buy_shop"}` or `{"type":"decline_shop"}` to decide.
- * Buying broadcasts `shop_purchased`, followed by `district_values_recalculated`
- * if it brought the buyer's owned count in that shop's district to 2 or
- * more. Any computer players whose turns immediately follow (once the
+ * respond with `{"type":"buy_shop"}` or `{"type":"decline_shop"}` to decide --
+ * `buy_shop` comes back as an `error` instead if the player can't afford the
+ * price, leaving the decision still pending. Buying broadcasts
+ * `shop_purchased`, followed by `district_values_recalculated` if it brought
+ * the buyer's owned count in that shop's district to 2 or more. Any computer
+ * players whose turns immediately follow (once the
  * current player's turn actually ends) are played out automatically too,
  * each broadcast in turn order right after the requested one -- including
  * their own shop purchase decisions, made immediately rather than paused

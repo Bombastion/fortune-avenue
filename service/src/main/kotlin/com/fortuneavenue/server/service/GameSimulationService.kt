@@ -30,7 +30,11 @@ import kotlin.uuid.Uuid
  * instead runs out on an unowned SHOP space, a human player is offered the
  * chance to buy it (see [buyShop]/[declineShopPurchase]) before the turn
  * actually ends, while a computer player decides right away (again see
- * [ComputerPlayer]) and keeps going. The turn ends once movement reaches
+ * [ComputerPlayer]) and keeps going -- either way, a purchase always
+ * requires enough gold on hand up front ([buyShop] fails otherwise; a
+ * computer player just silently skips it), even though gold can go
+ * negative afterward from other causes not yet implemented (see
+ * PlayerStatesTable.currentGold). The turn ends once movement reaches
  * zero with no choice or purchase decision pending, at which point play
  * moves to the next player in turn order -- announced with a
  * [TurnEvent.TurnStarted] the moment that next player is a human, since
@@ -278,14 +282,25 @@ class GameSimulationService(
 	/**
 	 * Buys the shop [playerId] is currently paused on (see
 	 * [TurnEvent.ShopPurchaseAvailable]) for its current price, deducted from their gold --
-	 * which can go negative, see PlayerStatesTable.currentGold. If this purchase brings the
-	 * player's owned count in that shop's district to 2 or more, every shop they own there
-	 * (including the one just bought) is recalculated per that district's progression (see
-	 * DistrictValueProgressionsTable). Ends the turn afterward and chains into any following
-	 * computer players' turns, exactly as [rollDice]/[choosePath] do.
+	 * which can go negative afterward from other causes not yet implemented, see
+	 * PlayerStatesTable.currentGold, but a purchase itself always requires enough gold on hand
+	 * up front; fails if it doesn't. If this purchase brings the player's owned count in that
+	 * shop's district to 2 or more, every shop they own there (including the one just bought)
+	 * is recalculated per that district's progression (see DistrictValueProgressionsTable).
+	 * Ends the turn afterward and chains into any following computer players' turns, exactly as
+	 * [rollDice]/[choosePath] do.
 	 */
 	fun buyShop(gameId: Uuid, playerId: Uuid): Result<List<TurnEvent>> {
 		val (game, shop, playersById) = pendingShopPurchase(gameId, playerId).getOrElse { return Result.failure(it) }
+		val gold = currentGold(playerId)
+			?: return Result.failure(InvalidPlayerException("Player $playerId has no state."))
+		if (gold < shop.currentValue) {
+			return Result.failure(
+				InvalidTurnException(
+					"Player $playerId can't afford this shop -- it costs ${shop.currentValue} but they only have $gold gold.",
+				),
+			)
+		}
 
 		val movement = endTurn(gameId, playerId, game, purchaseShop(gameId, playerId, shop))
 			.getOrElse { return Result.failure(it) }
@@ -402,7 +417,10 @@ class GameSimulationService(
 				return Result.success(MovementResult(events, game))
 			}
 
-			if (computerPlayer.shouldBuyShop(unownedShop)) {
+			// A computer player never pauses to ask, so an unaffordable shop is simply skipped --
+			// same outcome as it choosing not to buy, just without ComputerPlayer weighing in.
+			val canAfford = (currentGold(playerId) ?: 0) >= unownedShop.currentValue
+			if (canAfford && computerPlayer.shouldBuyShop(unownedShop)) {
 				events += purchaseShop(gameId, playerId, unownedShop)
 			}
 		}
@@ -462,6 +480,9 @@ class GameSimulationService(
 
 	private fun boosted(value: Int, percentage: BigDecimal): Int =
 		(BigDecimal(value) * (BigDecimal.ONE + percentage)).setScale(0, RoundingMode.HALF_UP).toInt()
+
+	/** Null only if [playerId] somehow has no state at all -- see [PlayerDao.findState]. */
+	private fun currentGold(playerId: Uuid): Int? = playerDao.findState(playerId)?.currentGold
 
 	private fun applyMove(
 		playerId: Uuid,

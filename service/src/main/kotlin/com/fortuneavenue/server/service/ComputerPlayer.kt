@@ -23,7 +23,9 @@ interface ComputerPlayer {
 class RandomComputerPlayer : ComputerPlayer {
 	override fun <T> chooseBranch(options: List<T>): T = options.random()
 
-	// Simplest possible policy for now -- always buy. Gold going negative is allowed (see
-	// PlayerStatesTable.currentGold), so there's no "can't afford it" case to weigh yet.
+	// Simplest possible policy for now -- always want to buy. Whether the computer player can
+	// actually afford it is enforced separately by GameSimulationService (a purchase requires
+	// enough gold on hand even though gold can go negative afterward from other causes -- see
+	// PlayerStatesTable.currentGold), not weighed here.
 	override fun shouldBuyShop(shop: GameShopInformation): Boolean = true
 }
