@@ -12,8 +12,7 @@ private const val MIN_SPACES_REQUIRING_PROGRESSIONS = 2
  * [MIN_SPACES_REQUIRING_PROGRESSIONS] spaces (per spaces' districtIndex) must define exactly one
  * progression entry for every ownedShopCount from 2 up to that district's total space count -- no
  * gaps, no duplicates, no extras -- and a district with fewer spaces must define none. Every
- * entry's existingShopBoostPercentage/newShopBoostPercentage must be a positive decimal (no upper
- * bound -- these are multipliers, not a fraction of a value like basePricePercentage) with exactly
+ * entry's existingShopBoostPercentage/newShopBoostPercentage must be a positive decimal with exactly
  * 4 digits.
  */
 object DistrictProgressionValidator {

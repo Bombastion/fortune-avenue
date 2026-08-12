@@ -35,9 +35,7 @@ data class CreateBoardPathRequest(
 /**
  * [ownedShopCount] is the count of shops a player has just reached in the district (2, 3, 4, ...
  * -- never 1, since a single shop has nothing to boost off of yet). [existingShopBoostPercentage]
- * and [newShopBoostPercentage] must each be a positive decimal with exactly 4 digits -- unlike
- * [CreateBoardSpaceRequest.basePricePercentage], these are multipliers with no upper bound. See
- * [DistrictProgressionValidator].
+ * and [newShopBoostPercentage] must each be a positive decimal with exactly 4 digits
  */
 data class CreateDistrictProgressionRequest(
 	val ownedShopCount: Int,
