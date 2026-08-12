@@ -116,6 +116,49 @@ class BoardDaoTest : DatabaseTest() {
 	}
 
 	@Test
+	fun `create persists district progressions and findById returns them`() {
+		val districts = listOf(
+			BoardDao.DistrictInput(
+				name = "Red",
+				colorHex = "FF0000",
+				progressionInputs = listOf(
+					BoardDao.ProgressionInput(2, BigDecimal("0.1000"), BigDecimal("0.1500")),
+					BoardDao.ProgressionInput(3, BigDecimal("0.0500"), BigDecimal("0.1000")),
+				),
+			),
+		)
+		val spaces = listOf(
+			BoardDao.SpaceInput(SpaceType.BASIC, districtIndex = 0),
+			BoardDao.SpaceInput(SpaceType.BASIC, districtIndex = 0),
+			BoardDao.SpaceInput(SpaceType.BASIC, districtIndex = 0),
+		)
+		val paths = listOf(
+			BoardDao.PathInput(0, 1, 0),
+			BoardDao.PathInput(1, 2, 0),
+			BoardDao.PathInput(2, 0, 0),
+		)
+
+		val created = boardDao.create(
+			name = "progression-board-${Uuid.random()}",
+			spaceInputs = spaces,
+			pathInputs = paths,
+			startIndex = 0,
+			districtInputs = districts,
+		)
+
+		assertThat(created.districtProgressions).hasSize(2)
+		val districtId = created.districts.single().id
+		assertThat(created.districtProgressions).allMatch { it.districtId == districtId }
+		assertThat(created.districtProgressions.map { it.ownedShopCount }).containsExactlyInAnyOrder(2, 3)
+
+		val found = boardDao.findById(created.board.id.value)
+
+		assertThat(found).isNotNull()
+		assertThat(found!!.districtProgressions).hasSize(2)
+		assertThat(found.districtProgressions.map { it.ownedShopCount }).containsExactlyInAnyOrder(2, 3)
+	}
+
+	@Test
 	fun `findById returns null for an id that does not exist`() {
 		val result = boardDao.findById(Uuid.random())
 

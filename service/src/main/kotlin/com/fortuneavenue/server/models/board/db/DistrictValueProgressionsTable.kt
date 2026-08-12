@@ -9,7 +9,7 @@ private const val BOOST_PERCENTAGE_SCALE = 4
  * How shop values in a district scale as a single player accumulates more of them there. One row
  * per step -- see the migration for the exact mechanics and the constraints enforced at the DB
  * level. Deliberately per-district (not a shared board-level curve): same-sized districts can
- * still scale differently from each other.
+ * still scale differently from each other if board makers desire.
  */
 object DistrictValueProgressionsTable : UuidTable("district_value_progressions") {
 	val districtId = reference("district_id", DistrictsTable)

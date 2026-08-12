@@ -18,10 +18,17 @@ data class BoardPathResponse(
 	val branchOrder: Int,
 )
 
+data class DistrictProgressionResponse(
+	val ownedShopCount: Int,
+	val existingShopBoostPercentage: BigDecimal,
+	val newShopBoostPercentage: BigDecimal,
+)
+
 data class DistrictResponse(
 	val id: String,
 	val name: String,
 	val colorHex: String,
+	val progressions: List<DistrictProgressionResponse> = emptyList(),
 )
 
 data class BoardResponse(
@@ -35,6 +42,7 @@ data class BoardResponse(
 
 fun BoardGraph.toResponse(): BoardResponse {
 	val shopInformationBySpaceId = shopInformation.associateBy { it.spaceId.value }
+	val progressionsByDistrictId = districtProgressions.groupBy { it.districtId.value }
 
 	return BoardResponse(
 		id = board.id.value.toString(),
@@ -59,8 +67,15 @@ fun BoardGraph.toResponse(): BoardResponse {
 				branchOrder = it.branchOrder,
 			)
 		},
-		districts = districts.map {
-			DistrictResponse(id = it.id.value.toString(), name = it.name, colorHex = it.colorHex)
+		districts = districts.map { district ->
+			DistrictResponse(
+				id = district.id.value.toString(),
+				name = district.name,
+				colorHex = district.colorHex,
+				progressions = progressionsByDistrictId[district.id.value].orEmpty()
+					.sortedBy { it.ownedShopCount }
+					.map { DistrictProgressionResponse(it.ownedShopCount, it.existingShopBoostPercentage, it.newShopBoostPercentage) },
+			)
 		},
 	)
 }

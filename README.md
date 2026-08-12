@@ -44,7 +44,13 @@ curl -s -X POST http://localhost:8080/boards \
     ],
     "startSpaceIndex": 0,
     "districts": [
-      { "name": "Blue District", "colorHex": "1E90FF" }
+      {
+        "name": "Blue District",
+        "colorHex": "1E90FF",
+        "progressions": [
+          { "ownedShopCount": 2, "existingShopBoostPercentage": 0.1000, "newShopBoostPercentage": 0.1500 }
+        ]
+      }
     ]
   }'
 
@@ -65,6 +71,8 @@ curl -s -X POST http://localhost:8080/games/GAME_ID/players \
 ```
 
 `userId` on the player call is optional — omit it (or pass `{}`) for an anonymous player. Repeat the user/player steps to add more players; a game needs at least one player, but `markReady` only starts the game once every player in it has readied up.
+
+A district's `progressions` describe how shop values there scale as a single player accumulates more of them: `existingShopBoostPercentage` is applied to shops the player already owns in the district, and `newShopBoostPercentage` (typically larger, to make up for missing out on earlier boosts) is applied to the one they just bought. Any district with 2 or more spaces needs exactly one entry per `ownedShopCount` from 2 up to its total space count; a district with fewer spaces needs none.
 
 ### 2. Play the game over WebSocket
 

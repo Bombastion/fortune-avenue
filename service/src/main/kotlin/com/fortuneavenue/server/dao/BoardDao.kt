@@ -8,12 +8,15 @@ import com.fortuneavenue.server.models.board.db.BoardSpace
 import com.fortuneavenue.server.models.board.db.BoardSpacesTable
 import com.fortuneavenue.server.models.board.db.BoardsTable
 import com.fortuneavenue.server.models.board.db.District
+import com.fortuneavenue.server.models.board.db.DistrictValueProgression
+import com.fortuneavenue.server.models.board.db.DistrictValueProgressionsTable
 import com.fortuneavenue.server.models.board.db.DistrictsTable
 import com.fortuneavenue.server.models.board.db.ShopInformation
 import com.fortuneavenue.server.models.board.db.ShopInformationTable
 import com.fortuneavenue.server.models.board.db.SpaceType
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.core.inList
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.springframework.stereotype.Repository
@@ -30,7 +33,8 @@ class BoardDao {
 		val districtIndex: Int? = null,
 	)
 	data class PathInput(val fromIndex: Int, val toIndex: Int, val branchOrder: Int)
-	data class DistrictInput(val name: String, val colorHex: String)
+	data class ProgressionInput(val ownedShopCount: Int, val existingShopBoostPercentage: BigDecimal, val newShopBoostPercentage: BigDecimal)
+	data class DistrictInput(val name: String, val colorHex: String, val progressionInputs: List<ProgressionInput> = emptyList())
 
 	fun create(
 		name: String,
@@ -59,6 +63,17 @@ class BoardDao {
 			}
 		}
 		districts.firstOrNull()?.flush()
+
+		val districtProgressions = districtInputs.zip(districts).flatMap { (input, district) ->
+			input.progressionInputs.map { progressionInput ->
+				DistrictValueProgression.new {
+					districtId = district.id
+					ownedShopCount = progressionInput.ownedShopCount
+					existingShopBoostPercentage = progressionInput.existingShopBoostPercentage
+					newShopBoostPercentage = progressionInput.newShopBoostPercentage
+				}
+			}
+		}
 
 		val spaces = spaceInputs.map { input ->
 			BoardSpace.new {
@@ -98,7 +113,20 @@ class BoardDao {
 			}
 		}
 
-		BoardGraph(board = board, spaces = spaces, paths = paths, shopInformation = shopInformation, districts = districts)
+		BoardGraph(
+			board = board,
+			spaces = spaces,
+			paths = paths,
+			shopInformation = shopInformation,
+			districts = districts,
+			districtProgressions = districtProgressions,
+		)
+	}
+
+	private fun districtProgressionsFor(districts: List<District>): List<DistrictValueProgression> {
+		if (districts.isEmpty()) return emptyList()
+		val districtIds = districts.map { it.id }
+		return DistrictValueProgression.find { DistrictValueProgressionsTable.districtId inList districtIds }.toList()
 	}
 
 	fun findById(id: Uuid): BoardGraph? = transaction {
@@ -107,8 +135,16 @@ class BoardDao {
 		val paths = BoardPath.find { BoardPathsTable.boardId eq board.id }.toList()
 		val shopInformation = ShopInformation.find { ShopInformationTable.boardId eq board.id }.toList()
 		val districts = District.find { DistrictsTable.boardId eq board.id }.toList()
+		val districtProgressions = districtProgressionsFor(districts)
 
-		BoardGraph(board = board, spaces = spaces, paths = paths, shopInformation = shopInformation, districts = districts)
+		BoardGraph(
+			board = board,
+			spaces = spaces,
+			paths = paths,
+			shopInformation = shopInformation,
+			districts = districts,
+			districtProgressions = districtProgressions,
+		)
 	}
 
 	/** Boards are sorted by name until we add sort criteria. */
@@ -125,7 +161,15 @@ class BoardDao {
 			val paths = BoardPath.find { BoardPathsTable.boardId eq board.id }.toList()
 			val shopInformation = ShopInformation.find { ShopInformationTable.boardId eq board.id }.toList()
 			val districts = District.find { DistrictsTable.boardId eq board.id }.toList()
-			BoardGraph(board = board, spaces = spaces, paths = paths, shopInformation = shopInformation, districts = districts)
+			val districtProgressions = districtProgressionsFor(districts)
+			BoardGraph(
+				board = board,
+				spaces = spaces,
+				paths = paths,
+				shopInformation = shopInformation,
+				districts = districts,
+				districtProgressions = districtProgressions,
+			)
 		}
 	}
 
