@@ -118,7 +118,7 @@ class DistrictProgressionValidatorTest {
 	}
 
 	@Test
-	fun `a boost percentage outside 0 and 1, or with the wrong scale, is rejected`() {
+	fun `a zero or negative boost percentage, or one with the wrong scale, is rejected`() {
 		val spaces = listOf(
 			CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0),
 			CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0),
@@ -127,10 +127,24 @@ class DistrictProgressionValidatorTest {
 		val zero = request(spaces = spaces, districts = listOf(CreateDistrictRequest("Red", "FF0000", progressions = listOf(progression(2, existing = "0.0000")))))
 		assertThat(DistrictProgressionValidator.validate(zero)).isNotEmpty()
 
-		val one = request(spaces = spaces, districts = listOf(CreateDistrictRequest("Red", "FF0000", progressions = listOf(progression(2, new = "1.0000")))))
-		assertThat(DistrictProgressionValidator.validate(one)).isNotEmpty()
+		val negative = request(spaces = spaces, districts = listOf(CreateDistrictRequest("Red", "FF0000", progressions = listOf(progression(2, new = "-0.1000")))))
+		assertThat(DistrictProgressionValidator.validate(negative)).isNotEmpty()
 
 		val wrongScale = request(spaces = spaces, districts = listOf(CreateDistrictRequest("Red", "FF0000", progressions = listOf(progression(2, existing = "0.1")))))
 		assertThat(DistrictProgressionValidator.validate(wrongScale)).isNotEmpty()
+	}
+
+	@Test
+	fun `a boost percentage greater than 1 is accepted -- boosts are multipliers with no upper bound`() {
+		val spaces = listOf(
+			CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0),
+			CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0),
+		)
+		val req = request(
+			spaces = spaces,
+			districts = listOf(CreateDistrictRequest("Red", "FF0000", progressions = listOf(progression(2, existing = "1.5000", new = "2.0000")))),
+		)
+
+		assertThat(DistrictProgressionValidator.validate(req)).isEmpty()
 	}
 }

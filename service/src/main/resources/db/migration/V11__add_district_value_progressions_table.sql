@@ -14,12 +14,14 @@ CREATE TABLE district_value_progressions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     district_id UUID NOT NULL REFERENCES districts(id) ON DELETE CASCADE,
     owned_shop_count INT NOT NULL,
-    existing_shop_boost_percentage NUMERIC(4, 4) NOT NULL,
-    new_shop_boost_percentage NUMERIC(4, 4) NOT NULL,
+    -- Boosts are positive multipliers with no fixed upper bound (e.g. 1.5000 is a valid, if
+    -- generous, 150% boost) -- unlike base_price_percentage, these aren't a fraction of a value.
+    existing_shop_boost_percentage NUMERIC(7, 4) NOT NULL,
+    new_shop_boost_percentage NUMERIC(7, 4) NOT NULL,
     CONSTRAINT chk_district_value_progressions_owned_shop_count_min CHECK (owned_shop_count >= 2),
-    CONSTRAINT chk_district_value_progressions_existing_shop_boost_percentage_range
-        CHECK (existing_shop_boost_percentage > 0 AND existing_shop_boost_percentage < 1),
-    CONSTRAINT chk_district_value_progressions_new_shop_boost_percentage_range
-        CHECK (new_shop_boost_percentage > 0 AND new_shop_boost_percentage < 1),
+    CONSTRAINT chk_district_value_progressions_existing_shop_boost_percentage_positive
+        CHECK (existing_shop_boost_percentage > 0),
+    CONSTRAINT chk_district_value_progressions_new_shop_boost_percentage_positive
+        CHECK (new_shop_boost_percentage > 0),
     UNIQUE (district_id, owned_shop_count)
 );

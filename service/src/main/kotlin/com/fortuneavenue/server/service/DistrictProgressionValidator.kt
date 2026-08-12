@@ -12,8 +12,9 @@ private const val MIN_SPACES_REQUIRING_PROGRESSIONS = 2
  * [MIN_SPACES_REQUIRING_PROGRESSIONS] spaces (per spaces' districtIndex) must define exactly one
  * progression entry for every ownedShopCount from 2 up to that district's total space count -- no
  * gaps, no duplicates, no extras -- and a district with fewer spaces must define none. Every
- * entry's existingShopBoostPercentage/newShopBoostPercentage must be strictly between 0 and 1 with
- * exactly 4 digits, the same rule [ShopSpaceValidator] applies to basePricePercentage.
+ * entry's existingShopBoostPercentage/newShopBoostPercentage must be a positive decimal (no upper
+ * bound -- these are multipliers, not a fraction of a value like basePricePercentage) with exactly
+ * 4 digits.
  */
 object DistrictProgressionValidator {
 
@@ -62,17 +63,17 @@ object DistrictProgressionValidator {
 		val errors = mutableListOf<String>()
 
 		if (!isValidBoostPercentage(progression.existingShopBoostPercentage)) {
-			errors += "District at index $index's progression for ownedShopCount ${progression.ownedShopCount} must have an " +
-				"existingShopBoostPercentage strictly between 0 and 1 with exactly $BOOST_PERCENTAGE_SCALE digits."
+			errors += "District at index $index's progression for ownedShopCount ${progression.ownedShopCount} must have a positive " +
+				"existingShopBoostPercentage with exactly $BOOST_PERCENTAGE_SCALE digits."
 		}
 		if (!isValidBoostPercentage(progression.newShopBoostPercentage)) {
-			errors += "District at index $index's progression for ownedShopCount ${progression.ownedShopCount} must have a " +
-				"newShopBoostPercentage strictly between 0 and 1 with exactly $BOOST_PERCENTAGE_SCALE digits."
+			errors += "District at index $index's progression for ownedShopCount ${progression.ownedShopCount} must have a positive " +
+				"newShopBoostPercentage with exactly $BOOST_PERCENTAGE_SCALE digits."
 		}
 
 		return errors
 	}
 
 	private fun isValidBoostPercentage(value: BigDecimal): Boolean =
-		value > BigDecimal.ZERO && value < BigDecimal.ONE && value.scale() == BOOST_PERCENTAGE_SCALE
+		value > BigDecimal.ZERO && value.scale() == BOOST_PERCENTAGE_SCALE
 }

@@ -2,7 +2,9 @@ package com.fortuneavenue.server.models.board.db
 
 import org.jetbrains.exposed.v1.core.dao.id.UuidTable
 
-private const val BOOST_PERCENTAGE_PRECISION = 4
+// Precision is higher than a plain percentage (e.g. basePricePercentage's) since boosts are
+// positive multipliers with no fixed upper bound -- see the migration.
+private const val BOOST_PERCENTAGE_PRECISION = 7
 private const val BOOST_PERCENTAGE_SCALE = 4
 
 /**
