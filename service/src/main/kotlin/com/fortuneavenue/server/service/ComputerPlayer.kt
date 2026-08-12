@@ -16,11 +16,12 @@ interface ComputerPlayer {
 	fun <T> chooseBranch(options: List<T>): T
 
 	/**
-	 * Decides whether to buy an unowned shop the computer player just landed on, given
-	 * [currentGold] -- how much gold it actually has on hand right now. Affordability is this
-	 * decision's responsibility entirely: GameSimulationService doesn't second-guess it, so an
-	 * implementation that says yes to a shop it can't afford would genuinely go through (and
-	 * leave currentGold negative, same as it would for a human -- see PlayerStatesTable.currentGold).
+	 * Decides whether the computer player *wants* to buy an unowned shop it just landed on, given
+	 * [currentGold] -- how much gold it actually has on hand right now. This isn't the only word
+	 * on whether the purchase actually happens, though: GameSimulationService still enforces that
+	 * a purchase can't leave currentGold negative (same floor a human's buyShop is held to -- see
+	 * PlayerStatesTable.currentGold for why that's fine *after* a purchase, just not to start
+	 * one), so saying yes here to a shop it can't afford is simply treated the same as saying no.
 	 */
 	fun shouldBuyShop(shop: GameShopInformation, currentGold: Int): Boolean
 }

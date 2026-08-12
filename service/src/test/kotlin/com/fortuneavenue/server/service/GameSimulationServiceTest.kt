@@ -1179,11 +1179,9 @@ class GameSimulationServiceTest {
 	}
 
 	@Test
-	fun `a computer player's shouldBuyShop is given their actual current gold, and its decision is respected`() {
-		// Whether a computer player can afford a shop is entirely ComputerPlayer's call to make
-		// (see RandomComputerPlayerTest for that policy) -- this only checks that
-		// GameSimulationService hands it the player's real currentGold to decide with, and does
-		// nothing more than what it decides.
+	fun `a computer player's shouldBuyShop is given their actual current gold, and a 'no' is respected`() {
+		// currentGold here is well more than enough to afford the shop, so there's nothing
+		// ambiguous about *why* no purchase happens -- it's purely because shouldBuyShop said no.
 		val computerId = Uuid.random()
 		val otherPlayerId = Uuid.random()
 		val spaceId = Uuid.random()
@@ -1192,7 +1190,7 @@ class GameSimulationServiceTest {
 		val game = mockGame(turnOrder = turnOrder, turnNumber = 0, maxTurns = 10)
 		val computer = mockPlayer(computerId, userId = null)
 		val otherPlayer = mockPlayer(otherPlayerId)
-		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceId, currentGold = 75)
+		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceId, currentGold = 1000)
 		val board = mockBoard()
 		val boardGraph = BoardGraph(board = board, spaces = emptyList(), paths = listOf(mockPath(spaceId, shopSpaceId, 0)))
 		val shop = mockShop(spaceId = shopSpaceId, currentValue = 100)
@@ -1203,7 +1201,7 @@ class GameSimulationServiceTest {
 		given(boardDao.findById(boardId)).willReturn(boardGraph)
 		given(dice.roll()).willReturn(1)
 		given(gameShopInformationDao.findByGameAndSpace(gameId, shopSpaceId)).willReturn(shop)
-		given(computerPlayer.shouldBuyShop(shop, 75)).willReturn(false)
+		given(computerPlayer.shouldBuyShop(shop, 1000)).willReturn(false)
 		given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
 
 		val result = service.rollDice(gameId, computerId)
@@ -1214,7 +1212,45 @@ class GameSimulationServiceTest {
 			GameSimulationService.TurnEvent.TurnEnded(computerId, 0, gameOver = false),
 			GameSimulationService.TurnEvent.TurnStarted(otherPlayerId, 1),
 		)
-		verify(computerPlayer).shouldBuyShop(shop, 75)
+		verify(computerPlayer).shouldBuyShop(shop, 1000)
 		verify(gameShopInformationDao, never()).setOwner(shop.id.value, computerId)
+	}
+
+	@Test
+	fun `GameSimulationService still blocks a computer's purchase it can't afford, even when ComputerPlayer says yes`() {
+		val computerId = Uuid.random()
+		val otherPlayerId = Uuid.random()
+		val spaceId = Uuid.random()
+		val shopSpaceId = Uuid.random()
+		val turnOrder = listOf(computerId, otherPlayerId)
+		val game = mockGame(turnOrder = turnOrder, turnNumber = 0, maxTurns = 10)
+		val computer = mockPlayer(computerId, userId = null)
+		val otherPlayer = mockPlayer(otherPlayerId)
+		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceId, currentGold = 50)
+		val board = mockBoard()
+		val boardGraph = BoardGraph(board = board, spaces = emptyList(), paths = listOf(mockPath(spaceId, shopSpaceId, 0)))
+		val shop = mockShop(spaceId = shopSpaceId, currentValue = 100)
+		val advancedGame = mockGame(turnOrder = turnOrder, turnNumber = 1)
+		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(computer, otherPlayer))
+		given(playerDao.findState(computerId)).willReturn(playerState)
+		given(boardDao.findById(boardId)).willReturn(boardGraph)
+		given(dice.roll()).willReturn(1)
+		given(gameShopInformationDao.findByGameAndSpace(gameId, shopSpaceId)).willReturn(shop)
+		// Deliberately "misbehaving" stub -- says yes despite being unaffordable, to prove
+		// GameSimulationService enforces the floor itself rather than trusting this blindly.
+		given(computerPlayer.shouldBuyShop(shop, 50)).willReturn(true)
+		given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
+
+		val result = service.rollDice(gameId, computerId)
+
+		assertThat(result.getOrNull()).containsExactly(
+			GameSimulationService.TurnEvent.DiceRolled(computerId, 1),
+			GameSimulationService.TurnEvent.Moved(computerId, 0, spaceId, shopSpaceId, 0),
+			GameSimulationService.TurnEvent.TurnEnded(computerId, 0, gameOver = false),
+			GameSimulationService.TurnEvent.TurnStarted(otherPlayerId, 1),
+		)
+		verify(gameShopInformationDao, never()).setOwner(shop.id.value, computerId)
+		verify(playerDao, never()).adjustGold(computerId, -100)
 	}
 }
