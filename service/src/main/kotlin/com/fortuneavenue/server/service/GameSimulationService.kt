@@ -29,11 +29,13 @@ import kotlin.uuid.Uuid
  * [ComputerPlayer]) and keeps going without ever pausing. If movement
  * instead runs out on an unowned SHOP space, a human player is offered the
  * chance to buy it (see [buyShop]/[declineShopPurchase]) before the turn
- * actually ends, while a computer player decides right away (again see
- * [ComputerPlayer]) and keeps going -- either way, a purchase always
- * requires enough gold on hand up front ([buyShop] fails otherwise; a
- * computer player just silently skips it), even though gold can go
- * negative afterward from other causes not yet implemented (see
+ * actually ends, while a computer player decides right away, given its
+ * actual current gold (again see [ComputerPlayer.shouldBuyShop]) and keeps
+ * going. A human's purchase always requires enough gold on hand up front
+ * ([buyShop] fails otherwise) -- a computer player's doesn't have that
+ * enforced here at all, since whether it can afford one is entirely
+ * [ComputerPlayer]'s call to make. Either way, gold can go negative
+ * afterward from other causes not yet implemented (see
  * PlayerStatesTable.currentGold). The turn ends once movement reaches
  * zero with no choice or purchase decision pending, at which point play
  * moves to the next player in turn order -- announced with a
@@ -417,10 +419,10 @@ class GameSimulationService(
 				return Result.success(MovementResult(events, game))
 			}
 
-			// A computer player never pauses to ask, so an unaffordable shop is simply skipped --
-			// same outcome as it choosing not to buy, just without ComputerPlayer weighing in.
-			val canAfford = (currentGold(playerId) ?: 0) >= unownedShop.currentValue
-			if (canAfford && computerPlayer.shouldBuyShop(unownedShop)) {
+			// Whether it can actually afford unownedShop.currentValue is entirely ComputerPlayer's
+			// call to make (see its shouldBuyShop doc) -- this just hands it the real currentGold
+			// to decide with, same as a human would see it in a ShopPurchaseAvailable event.
+			if (computerPlayer.shouldBuyShop(unownedShop, currentGold(playerId) ?: 0)) {
 				events += purchaseShop(gameId, playerId, unownedShop)
 			}
 		}

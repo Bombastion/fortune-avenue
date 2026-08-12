@@ -1122,7 +1122,7 @@ class GameSimulationServiceTest {
 		given(boardDao.findById(boardId)).willReturn(boardGraph)
 		given(dice.roll()).willReturn(1)
 		given(gameShopInformationDao.findByGameAndSpace(gameId, shopSpaceId)).willReturn(shop)
-		given(computerPlayer.shouldBuyShop(shop)).willReturn(true)
+		given(computerPlayer.shouldBuyShop(shop, 1000)).willReturn(true)
 		given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
 
 		val result = service.rollDice(gameId, computerId)
@@ -1164,7 +1164,7 @@ class GameSimulationServiceTest {
 		given(boardDao.findById(boardId)).willReturn(boardGraph)
 		given(dice.roll()).willReturn(1)
 		given(gameShopInformationDao.findByGameAndSpace(gameId, shopSpaceId)).willReturn(shop)
-		given(computerPlayer.shouldBuyShop(shop)).willReturn(false)
+		given(computerPlayer.shouldBuyShop(shop, 1000)).willReturn(false)
 		given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
 
 		val result = service.rollDice(gameId, computerId)
@@ -1179,7 +1179,11 @@ class GameSimulationServiceTest {
 	}
 
 	@Test
-	fun `a computer player skips buying a shop it can't afford, ending the turn normally without ever weighing in`() {
+	fun `a computer player's shouldBuyShop is given their actual current gold, and its decision is respected`() {
+		// Whether a computer player can afford a shop is entirely ComputerPlayer's call to make
+		// (see RandomComputerPlayerTest for that policy) -- this only checks that
+		// GameSimulationService hands it the player's real currentGold to decide with, and does
+		// nothing more than what it decides.
 		val computerId = Uuid.random()
 		val otherPlayerId = Uuid.random()
 		val spaceId = Uuid.random()
@@ -1188,7 +1192,7 @@ class GameSimulationServiceTest {
 		val game = mockGame(turnOrder = turnOrder, turnNumber = 0, maxTurns = 10)
 		val computer = mockPlayer(computerId, userId = null)
 		val otherPlayer = mockPlayer(otherPlayerId)
-		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceId, currentGold = 50)
+		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceId, currentGold = 75)
 		val board = mockBoard()
 		val boardGraph = BoardGraph(board = board, spaces = emptyList(), paths = listOf(mockPath(spaceId, shopSpaceId, 0)))
 		val shop = mockShop(spaceId = shopSpaceId, currentValue = 100)
@@ -1199,6 +1203,7 @@ class GameSimulationServiceTest {
 		given(boardDao.findById(boardId)).willReturn(boardGraph)
 		given(dice.roll()).willReturn(1)
 		given(gameShopInformationDao.findByGameAndSpace(gameId, shopSpaceId)).willReturn(shop)
+		given(computerPlayer.shouldBuyShop(shop, 75)).willReturn(false)
 		given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
 
 		val result = service.rollDice(gameId, computerId)
@@ -1209,9 +1214,7 @@ class GameSimulationServiceTest {
 			GameSimulationService.TurnEvent.TurnEnded(computerId, 0, gameOver = false),
 			GameSimulationService.TurnEvent.TurnStarted(otherPlayerId, 1),
 		)
-		// Affordability is checked before ComputerPlayer ever gets a say -- there's nothing to
-		// decide once the shop is out of reach.
-		verify(computerPlayer, never()).shouldBuyShop(shop)
+		verify(computerPlayer).shouldBuyShop(shop, 75)
 		verify(gameShopInformationDao, never()).setOwner(shop.id.value, computerId)
 	}
 }
