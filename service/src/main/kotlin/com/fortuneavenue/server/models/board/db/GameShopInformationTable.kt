@@ -25,6 +25,10 @@ object GameShopInformationTable : UuidTable("game_shop_information") {
 	// Nullable, null by default: no player owns the shop until someone buys in.
 	val ownerId = optReference("owner_id", PlayersTable)
 
+	// Denormalized from the space's district (see the migration) -- lets a player's owned shops
+	// within a district be found directly, without joining through board_spaces every time.
+	val districtId = optReference("district_id", DistrictsTable)
+
 	val currentValue = integer("current_value")
 	val currentInvestment = integer("current_investment")
 	val maxCap = integer("max_cap")

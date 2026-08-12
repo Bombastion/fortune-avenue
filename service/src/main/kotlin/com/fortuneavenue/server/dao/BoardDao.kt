@@ -15,6 +15,8 @@ import com.fortuneavenue.server.models.board.db.ShopInformation
 import com.fortuneavenue.server.models.board.db.ShopInformationTable
 import com.fortuneavenue.server.models.board.db.SpaceType
 import org.jetbrains.exposed.v1.core.SortOrder
+import org.jetbrains.exposed.v1.core.and
+import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.inList
 import org.jetbrains.exposed.v1.jdbc.selectAll
@@ -143,6 +145,14 @@ class BoardDao {
 	/** A single-column lookup for [com.fortuneavenue.server.service.PlayerService] -- cheaper than loading a full [BoardGraph] via [findById]. */
 	fun findStartingGold(id: Uuid): Int? = transaction {
 		Board.findById(id)?.startingGold
+	}
+
+	/** The progression row for a district at a specific owned-shop count, if one's been defined -- see [GameSimulationService][com.fortuneavenue.server.service.GameSimulationService]'s shop purchase handling. */
+	fun findDistrictValueProgression(districtId: EntityID<Uuid>, ownedShopCount: Int): DistrictValueProgression? = transaction {
+		DistrictValueProgression.find {
+			(DistrictValueProgressionsTable.districtId eq districtId) and
+				(DistrictValueProgressionsTable.ownedShopCount eq ownedShopCount)
+		}.firstOrNull()
 	}
 
 	fun findById(id: Uuid): BoardGraph? = transaction {

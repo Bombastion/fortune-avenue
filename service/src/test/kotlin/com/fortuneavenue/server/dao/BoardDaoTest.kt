@@ -177,6 +177,35 @@ class BoardDaoTest : DatabaseTest() {
 	}
 
 	@Test
+	fun `findDistrictValueProgression finds the row for a district and owned count, or null if none was defined`() {
+		val districts = listOf(
+			BoardDao.DistrictInput(
+				name = "Red",
+				colorHex = "FF0000",
+				progressionInputs = listOf(BoardDao.ProgressionInput(2, BigDecimal("0.1000"), BigDecimal("0.1500"))),
+			),
+		)
+		val created = boardDao.create(
+			name = "progression-lookup-board-${Uuid.random()}",
+			spaceInputs = listOf(
+				BoardDao.SpaceInput(SpaceType.BASIC, districtIndex = 0),
+				BoardDao.SpaceInput(SpaceType.BASIC, districtIndex = 0),
+			),
+			pathInputs = listOf(BoardDao.PathInput(0, 1, 0), BoardDao.PathInput(1, 0, 0)),
+			startIndex = 0,
+			districtInputs = districts,
+		)
+		val districtId = created.districts.single().id
+
+		val found = boardDao.findDistrictValueProgression(districtId, 2)
+		assertThat(found).isNotNull()
+		assertThat(found!!.existingShopBoostPercentage).isEqualByComparingTo(BigDecimal("0.1000"))
+		assertThat(found.newShopBoostPercentage).isEqualByComparingTo(BigDecimal("0.1500"))
+
+		assertThat(boardDao.findDistrictValueProgression(districtId, 3)).isNull()
+	}
+
+	@Test
 	fun `findById returns null for an id that does not exist`() {
 		val result = boardDao.findById(Uuid.random())
 

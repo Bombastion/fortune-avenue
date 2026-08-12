@@ -72,6 +72,24 @@ class PlayerDaoTest : DatabaseTest() {
 	}
 
 	@Test
+	fun `adjustGold adds a positive or negative delta to currentGold, allowing it to go negative`() {
+		val player = playerDao.create(gameId = createGame().id.value, currentGold = 100)
+
+		playerDao.adjustGold(player.id.value, -30)
+		assertThat(playerDao.findState(player.id.value)!!.currentGold).isEqualTo(70)
+
+		playerDao.adjustGold(player.id.value, -100)
+		assertThat(playerDao.findState(player.id.value)!!.currentGold).isEqualTo(-30)
+	}
+
+	@Test
+	fun `adjustGold returns null for a player id that does not exist`() {
+		val result = playerDao.adjustGold(Uuid.random(), 10)
+
+		assertThat(result).isNull()
+	}
+
+	@Test
 	fun `findState returns null for a player id that does not exist`() {
 		val result = playerDao.findState(Uuid.random())
 

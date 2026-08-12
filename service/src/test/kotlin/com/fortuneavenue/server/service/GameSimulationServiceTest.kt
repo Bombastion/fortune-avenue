@@ -2,12 +2,17 @@ package com.fortuneavenue.server.service
 
 import com.fortuneavenue.server.dao.BoardDao
 import com.fortuneavenue.server.dao.GameDao
+import com.fortuneavenue.server.dao.GameShopInformationDao
 import com.fortuneavenue.server.dao.PlayerDao
 import com.fortuneavenue.server.models.board.db.Board
 import com.fortuneavenue.server.models.board.db.BoardGraph
 import com.fortuneavenue.server.models.board.db.BoardPath
 import com.fortuneavenue.server.models.board.db.BoardSpacesTable
 import com.fortuneavenue.server.models.board.db.BoardsTable
+import com.fortuneavenue.server.models.board.db.DistrictValueProgression
+import com.fortuneavenue.server.models.board.db.DistrictsTable
+import com.fortuneavenue.server.models.board.db.GameShopInformation
+import com.fortuneavenue.server.models.board.db.GameShopInformationTable
 import com.fortuneavenue.server.models.game.db.Game
 import com.fortuneavenue.server.models.player.db.Player
 import com.fortuneavenue.server.models.player.db.PlayerState
@@ -26,6 +31,7 @@ import org.mockito.Mockito.mock
 import org.mockito.Mockito.never
 import org.mockito.Mockito.verify
 import org.mockito.junit.jupiter.MockitoExtension
+import java.math.BigDecimal
 import kotlin.uuid.Uuid
 
 @ExtendWith(MockitoExtension::class)
@@ -41,6 +47,9 @@ class GameSimulationServiceTest {
 	lateinit var boardDao: BoardDao
 
 	@Mock
+	lateinit var gameShopInformationDao: GameShopInformationDao
+
+	@Mock
 	lateinit var dice: Dice
 
 	@Mock
@@ -53,7 +62,7 @@ class GameSimulationServiceTest {
 
 	@BeforeEach
 	fun setUp() {
-		service = GameSimulationService(gameDao, playerDao, boardDao, dice, computerPlayer)
+		service = GameSimulationService(gameDao, playerDao, boardDao, gameShopInformationDao, dice, computerPlayer)
 	}
 
 	/** [userId] defaults to a human player -- pass null to mock a computer player instead. */
@@ -83,6 +92,21 @@ class GameSimulationServiceTest {
 		val board = mock(Board::class.java)
 		lenient().`when`(board.startSpaceId).thenReturn(startSpaceId)
 		return board
+	}
+
+	private fun mockShop(
+		spaceId: Uuid,
+		currentValue: Int,
+		ownerId: Uuid? = null,
+		districtId: Uuid? = null,
+	): GameShopInformation {
+		val shop = mock(GameShopInformation::class.java)
+		lenient().`when`(shop.id).thenReturn(EntityID(Uuid.random(), GameShopInformationTable))
+		lenient().`when`(shop.spaceId).thenReturn(EntityID(spaceId, BoardSpacesTable))
+		lenient().`when`(shop.currentValue).thenReturn(currentValue)
+		lenient().`when`(shop.ownerId).thenReturn(ownerId?.let { EntityID(it, PlayersTable) })
+		lenient().`when`(shop.districtId).thenReturn(districtId?.let { EntityID(it, DistrictsTable) })
+		return shop
 	}
 
 	private fun mockGame(
@@ -833,5 +857,301 @@ class GameSimulationServiceTest {
 		val movedEvents = events.filterIsInstance<GameSimulationService.TurnEvent.Moved>()
 		assertThat(movedEvents.map { it.playerId }).containsExactly(humanId, computerId)
 		assertThat(movedEvents.last().toSpaceId).isEqualTo(computerNextSpaceId)
+	}
+
+	// --- markReady seeds shop info ---
+
+	@Test
+	fun `markReady seeds per-game shop information once the game actually starts`() {
+		val playerId = Uuid.random()
+		val game = mockGame()
+		val player = mockPlayer(playerId)
+		val board = mockBoard()
+		val boardGraph = BoardGraph(board = board, spaces = emptyList(), paths = emptyList())
+		val startedGame = mockGame(turnOrder = listOf(playerId))
+		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
+		given(gameDao.startGame(gameId, listOf(playerId))).willReturn(startedGame)
+		given(boardDao.findById(boardId)).willReturn(boardGraph)
+
+		service.markReady(gameId, playerId)
+
+		verify(gameShopInformationDao).seedForGame(gameId, boardGraph)
+	}
+
+	// --- shop purchases ---
+
+	@Test
+	fun `rollDice pauses and offers a purchase when movement ends on an unowned shop, for a human player`() {
+		val playerId = Uuid.random()
+		val spaceId = Uuid.random()
+		val shopSpaceId = Uuid.random()
+		val game = mockGame(turnOrder = listOf(playerId))
+		val player = mockPlayer(playerId)
+		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceId)
+		val board = mockBoard()
+		val boardGraph = BoardGraph(board = board, spaces = emptyList(), paths = listOf(mockPath(spaceId, shopSpaceId, 0)))
+		val shop = mockShop(spaceId = shopSpaceId, currentValue = 250)
+		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
+		given(playerDao.findState(playerId)).willReturn(playerState)
+		given(boardDao.findById(boardId)).willReturn(boardGraph)
+		given(dice.roll()).willReturn(1)
+		given(gameShopInformationDao.findByGameAndSpace(gameId, shopSpaceId)).willReturn(shop)
+
+		val result = service.rollDice(gameId, playerId)
+
+		val events = result.getOrNull()
+		assertThat(events).containsExactly(
+			GameSimulationService.TurnEvent.DiceRolled(playerId, 1),
+			GameSimulationService.TurnEvent.Moved(playerId, 0, spaceId, shopSpaceId, 0),
+			GameSimulationService.TurnEvent.ShopPurchaseAvailable(playerId, shopSpaceId, 250),
+		)
+		verify(gameDao).setMovementPoints(gameId, 0)
+		verify(gameDao, never()).advanceTurn(gameId)
+	}
+
+	@Test
+	fun `rollDice ends the turn normally when landing on an already-owned shop`() {
+		val playerId = Uuid.random()
+		val ownerId = Uuid.random()
+		val spaceId = Uuid.random()
+		val shopSpaceId = Uuid.random()
+		val game = mockGame(turnOrder = listOf(playerId))
+		val player = mockPlayer(playerId)
+		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceId)
+		val board = mockBoard()
+		val boardGraph = BoardGraph(board = board, spaces = emptyList(), paths = listOf(mockPath(spaceId, shopSpaceId, 0)))
+		val shop = mockShop(spaceId = shopSpaceId, currentValue = 250, ownerId = ownerId)
+		val advancedGame = mockGame(turnOrder = listOf(playerId), turnNumber = 1)
+		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
+		given(playerDao.findState(playerId)).willReturn(playerState)
+		given(boardDao.findById(boardId)).willReturn(boardGraph)
+		given(dice.roll()).willReturn(1)
+		given(gameShopInformationDao.findByGameAndSpace(gameId, shopSpaceId)).willReturn(shop)
+		given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
+
+		val result = service.rollDice(gameId, playerId)
+
+		assertThat(result.getOrNull()).containsExactly(
+			GameSimulationService.TurnEvent.DiceRolled(playerId, 1),
+			GameSimulationService.TurnEvent.Moved(playerId, 0, spaceId, shopSpaceId, 0),
+			GameSimulationService.TurnEvent.TurnEnded(playerId, 0, gameOver = false),
+			GameSimulationService.TurnEvent.TurnStarted(playerId, 1),
+		)
+	}
+
+	@Test
+	fun `buyShop fails when there's no purchase decision pending`() {
+		val playerId = Uuid.random()
+		val game = mockGame(turnOrder = listOf(playerId), currentMovementPoints = null)
+		given(gameDao.findById(gameId)).willReturn(game)
+
+		val result = service.buyShop(gameId, playerId)
+
+		assertThat(result.exceptionOrNull()).isInstanceOf(InvalidTurnException::class.java)
+	}
+
+	@Test
+	fun `buyShop fails when the player is mid-movement with a branch choice pending, not a purchase`() {
+		val playerId = Uuid.random()
+		val game = mockGame(turnOrder = listOf(playerId), currentMovementPoints = 2)
+		given(gameDao.findById(gameId)).willReturn(game)
+
+		val result = service.buyShop(gameId, playerId)
+
+		assertThat(result.exceptionOrNull()).isInstanceOf(InvalidTurnException::class.java)
+	}
+
+	@Test
+	fun `buyShop deducts the price from the player's gold, sets ownership, and ends the turn`() {
+		val playerId = Uuid.random()
+		val spaceId = Uuid.random()
+		val game = mockGame(turnOrder = listOf(playerId), turnNumber = 0, currentMovementPoints = 0)
+		val player = mockPlayer(playerId)
+		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceId)
+		val shop = mockShop(spaceId = spaceId, currentValue = 150)
+		val advancedGame = mockGame(turnOrder = listOf(playerId), turnNumber = 1)
+		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
+		given(playerDao.findState(playerId)).willReturn(playerState)
+		given(gameShopInformationDao.findByGameAndSpace(gameId, spaceId)).willReturn(shop)
+		given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
+
+		val result = service.buyShop(gameId, playerId)
+
+		assertThat(result.getOrNull()).containsExactly(
+			GameSimulationService.TurnEvent.ShopPurchased(playerId, spaceId, 150),
+			GameSimulationService.TurnEvent.TurnEnded(playerId, 0, gameOver = false),
+			GameSimulationService.TurnEvent.TurnStarted(playerId, 1),
+		)
+		verify(playerDao).adjustGold(playerId, -150)
+		verify(gameShopInformationDao).setOwner(shop.id.value, playerId)
+	}
+
+	@Test
+	fun `buyShop recalculates every owned shop in the district once the player's count there reaches 2`() {
+		val playerId = Uuid.random()
+		val spaceId = Uuid.random()
+		val otherSpaceId = Uuid.random()
+		val districtId = Uuid.random()
+		val game = mockGame(turnOrder = listOf(playerId), turnNumber = 0, currentMovementPoints = 0)
+		val player = mockPlayer(playerId)
+		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceId)
+		val newShop = mockShop(spaceId = spaceId, currentValue = 100, districtId = districtId)
+		val existingShop = mockShop(spaceId = otherSpaceId, currentValue = 200, ownerId = playerId, districtId = districtId)
+		val progression = mock(DistrictValueProgression::class.java)
+		lenient().`when`(progression.existingShopBoostPercentage).thenReturn(BigDecimal("0.1000"))
+		lenient().`when`(progression.newShopBoostPercentage).thenReturn(BigDecimal("0.2000"))
+		val advancedGame = mockGame(turnOrder = listOf(playerId), turnNumber = 1)
+		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
+		given(playerDao.findState(playerId)).willReturn(playerState)
+		given(gameShopInformationDao.findByGameAndSpace(gameId, spaceId)).willReturn(newShop)
+		given(gameShopInformationDao.findOwnedByPlayerInDistrict(gameId, playerId, newShop.districtId!!))
+			.willReturn(listOf(newShop, existingShop))
+		given(boardDao.findDistrictValueProgression(newShop.districtId!!, 2)).willReturn(progression)
+		given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
+
+		val result = service.buyShop(gameId, playerId)
+
+		val events = result.getOrNull()
+		val recalculated = events?.filterIsInstance<GameSimulationService.TurnEvent.DistrictValuesRecalculated>()?.single()
+		assertThat(recalculated).isNotNull()
+		assertThat(recalculated!!.districtId).isEqualTo(districtId)
+		// newShop just bought: 100 boosted by newShopBoostPercentage (0.2000) -> 120
+		assertThat(recalculated.newValuesBySpaceId[spaceId]).isEqualTo(120)
+		// existingShop already owned: 200 boosted by existingShopBoostPercentage (0.1000) -> 220
+		assertThat(recalculated.newValuesBySpaceId[otherSpaceId]).isEqualTo(220)
+		verify(gameShopInformationDao).setCurrentValue(newShop.id.value, 120)
+		verify(gameShopInformationDao).setCurrentValue(existingShop.id.value, 220)
+	}
+
+	@Test
+	fun `buyShop does not recalculate district values when this is still the player's only shop there`() {
+		val playerId = Uuid.random()
+		val spaceId = Uuid.random()
+		val districtId = Uuid.random()
+		val game = mockGame(turnOrder = listOf(playerId), turnNumber = 0, currentMovementPoints = 0)
+		val player = mockPlayer(playerId)
+		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceId)
+		val shop = mockShop(spaceId = spaceId, currentValue = 100, districtId = districtId)
+		val advancedGame = mockGame(turnOrder = listOf(playerId), turnNumber = 1)
+		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
+		given(playerDao.findState(playerId)).willReturn(playerState)
+		given(gameShopInformationDao.findByGameAndSpace(gameId, spaceId)).willReturn(shop)
+		given(gameShopInformationDao.findOwnedByPlayerInDistrict(gameId, playerId, shop.districtId!!)).willReturn(listOf(shop))
+		given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
+
+		val result = service.buyShop(gameId, playerId)
+
+		assertThat(result.getOrNull()).containsExactly(
+			GameSimulationService.TurnEvent.ShopPurchased(playerId, spaceId, 100),
+			GameSimulationService.TurnEvent.TurnEnded(playerId, 0, gameOver = false),
+			GameSimulationService.TurnEvent.TurnStarted(playerId, 1),
+		)
+	}
+
+	@Test
+	fun `declineShopPurchase ends the turn without buying anything`() {
+		val playerId = Uuid.random()
+		val spaceId = Uuid.random()
+		val game = mockGame(turnOrder = listOf(playerId), turnNumber = 0, currentMovementPoints = 0)
+		val player = mockPlayer(playerId)
+		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceId)
+		val shop = mockShop(spaceId = spaceId, currentValue = 150)
+		val advancedGame = mockGame(turnOrder = listOf(playerId), turnNumber = 1)
+		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
+		given(playerDao.findState(playerId)).willReturn(playerState)
+		given(gameShopInformationDao.findByGameAndSpace(gameId, spaceId)).willReturn(shop)
+		given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
+
+		val result = service.declineShopPurchase(gameId, playerId)
+
+		assertThat(result.getOrNull()).containsExactly(
+			GameSimulationService.TurnEvent.TurnEnded(playerId, 0, gameOver = false),
+			GameSimulationService.TurnEvent.TurnStarted(playerId, 1),
+		)
+		verify(gameShopInformationDao, never()).setOwner(shop.id.value, playerId)
+	}
+
+	@Test
+	fun `a computer player automatically buys an unowned shop it lands on, without pausing`() {
+		val computerId = Uuid.random()
+		val otherPlayerId = Uuid.random()
+		val spaceId = Uuid.random()
+		val shopSpaceId = Uuid.random()
+		val turnOrder = listOf(computerId, otherPlayerId)
+		val game = mockGame(turnOrder = turnOrder, turnNumber = 0, maxTurns = 10)
+		val computer = mockPlayer(computerId, userId = null)
+		val otherPlayer = mockPlayer(otherPlayerId)
+		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceId)
+		val board = mockBoard()
+		val boardGraph = BoardGraph(board = board, spaces = emptyList(), paths = listOf(mockPath(spaceId, shopSpaceId, 0)))
+		val shop = mockShop(spaceId = shopSpaceId, currentValue = 100)
+		val advancedGame = mockGame(turnOrder = turnOrder, turnNumber = 1)
+		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(computer, otherPlayer))
+		given(playerDao.findState(computerId)).willReturn(playerState)
+		given(boardDao.findById(boardId)).willReturn(boardGraph)
+		given(dice.roll()).willReturn(1)
+		given(gameShopInformationDao.findByGameAndSpace(gameId, shopSpaceId)).willReturn(shop)
+		given(computerPlayer.shouldBuyShop(shop)).willReturn(true)
+		given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
+
+		val result = service.rollDice(gameId, computerId)
+
+		assertThat(result.getOrNull()).containsExactly(
+			GameSimulationService.TurnEvent.DiceRolled(computerId, 1),
+			GameSimulationService.TurnEvent.Moved(computerId, 0, spaceId, shopSpaceId, 0),
+			GameSimulationService.TurnEvent.ShopPurchased(computerId, shopSpaceId, 100),
+			GameSimulationService.TurnEvent.TurnEnded(computerId, 0, gameOver = false),
+			GameSimulationService.TurnEvent.TurnStarted(otherPlayerId, 1),
+		)
+		verify(playerDao).adjustGold(computerId, -100)
+		verify(gameDao, never()).setMovementPoints(gameId, 0)
+	}
+
+	@Test
+	fun `a computer player can decline to buy a shop it lands on`() {
+		val computerId = Uuid.random()
+		// A second, human player after this one in turn order -- same reason as
+		// `rollDice lets a computer player pick a branch randomly instead of pausing`
+		// above: with a turn order of just the one computer, ending its turn hands
+		// play right back to that same computer again (and again), and this test's
+		// fixed, non-incrementing advanceTurn stub would make that loop forever.
+		val otherPlayerId = Uuid.random()
+		val spaceId = Uuid.random()
+		val shopSpaceId = Uuid.random()
+		val turnOrder = listOf(computerId, otherPlayerId)
+		val game = mockGame(turnOrder = turnOrder, turnNumber = 0, maxTurns = 10)
+		val computer = mockPlayer(computerId, userId = null)
+		val otherPlayer = mockPlayer(otherPlayerId)
+		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceId)
+		val board = mockBoard()
+		val boardGraph = BoardGraph(board = board, spaces = emptyList(), paths = listOf(mockPath(spaceId, shopSpaceId, 0)))
+		val shop = mockShop(spaceId = shopSpaceId, currentValue = 100)
+		val advancedGame = mockGame(turnOrder = turnOrder, turnNumber = 1)
+		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(computer, otherPlayer))
+		given(playerDao.findState(computerId)).willReturn(playerState)
+		given(boardDao.findById(boardId)).willReturn(boardGraph)
+		given(dice.roll()).willReturn(1)
+		given(gameShopInformationDao.findByGameAndSpace(gameId, shopSpaceId)).willReturn(shop)
+		given(computerPlayer.shouldBuyShop(shop)).willReturn(false)
+		given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
+
+		val result = service.rollDice(gameId, computerId)
+
+		assertThat(result.getOrNull()).containsExactly(
+			GameSimulationService.TurnEvent.DiceRolled(computerId, 1),
+			GameSimulationService.TurnEvent.Moved(computerId, 0, spaceId, shopSpaceId, 0),
+			GameSimulationService.TurnEvent.TurnEnded(computerId, 0, gameOver = false),
+			GameSimulationService.TurnEvent.TurnStarted(otherPlayerId, 1),
+		)
+		verify(gameShopInformationDao, never()).setOwner(shop.id.value, computerId)
 	}
 }

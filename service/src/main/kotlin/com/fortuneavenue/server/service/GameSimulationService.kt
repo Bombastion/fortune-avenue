@@ -2,13 +2,17 @@ package com.fortuneavenue.server.service
 
 import com.fortuneavenue.server.dao.BoardDao
 import com.fortuneavenue.server.dao.GameDao
+import com.fortuneavenue.server.dao.GameShopInformationDao
 import com.fortuneavenue.server.dao.PlayerDao
 import com.fortuneavenue.server.models.board.db.BoardGraph
 import com.fortuneavenue.server.models.board.db.BoardPath
+import com.fortuneavenue.server.models.board.db.GameShopInformation
 import com.fortuneavenue.server.models.game.db.Game
 import com.fortuneavenue.server.models.player.db.Player
 import com.fortuneavenue.server.models.player.db.PlayerStatus
 import org.springframework.stereotype.Service
+import java.math.BigDecimal
+import java.math.RoundingMode
 import kotlin.uuid.Uuid
 
 /**
@@ -22,8 +26,12 @@ import kotlin.uuid.Uuid
  * somewhere with more than one outgoing path, movement pauses: a human
  * player has to choose which branch to take (see [choosePath]) before
  * moving continues, while a computer player picks right away (see
- * [ComputerPlayer]) and keeps going without ever pausing. The turn ends
- * once movement reaches zero with no choice pending, at which point play
+ * [ComputerPlayer]) and keeps going without ever pausing. If movement
+ * instead runs out on an unowned SHOP space, a human player is offered the
+ * chance to buy it (see [buyShop]/[declineShopPurchase]) before the turn
+ * actually ends, while a computer player decides right away (again see
+ * [ComputerPlayer]) and keeps going. The turn ends once movement reaches
+ * zero with no choice or purchase decision pending, at which point play
  * moves to the next player in turn order -- announced with a
  * [TurnEvent.TurnStarted] the moment that next player is a human, since
  * nothing else is going to happen until they roll themselves.
@@ -43,6 +51,7 @@ class GameSimulationService(
 	private val gameDao: GameDao,
 	private val playerDao: PlayerDao,
 	private val boardDao: BoardDao,
+	private val gameShopInformationDao: GameShopInformationDao,
 	private val dice: Dice,
 	private val computerPlayer: ComputerPlayer,
 ) {
@@ -88,6 +97,36 @@ class GameSimulationService(
 			override val playerId: Uuid,
 			val spaceId: Uuid,
 			val options: List<PathOption>,
+		) : TurnEvent
+
+		/**
+		 * Movement ended on [spaceId], an unowned SHOP -- paused until [buyShop] or
+		 * [declineShopPurchase] decides what to do. Only ever emitted for a human; a computer
+		 * player decides immediately instead (see [ComputerPlayer.shouldBuyShop]).
+		 */
+		data class ShopPurchaseAvailable(
+			override val playerId: Uuid,
+			val spaceId: Uuid,
+			val price: Int,
+		) : TurnEvent
+
+		/** [playerId] bought the shop at [spaceId] for [price], deducted from their gold. */
+		data class ShopPurchased(
+			override val playerId: Uuid,
+			val spaceId: Uuid,
+			val price: Int,
+		) : TurnEvent
+
+		/**
+		 * Emitted right after a [ShopPurchased] that brought [playerId]'s owned count in
+		 * [districtId] to 2 or more -- every shop they own there (including the one just
+		 * bought) has been recalculated per that district's progression.
+		 * [newValuesBySpaceId] maps each affected shop's spaceId to its new currentValue.
+		 */
+		data class DistrictValuesRecalculated(
+			override val playerId: Uuid,
+			val districtId: Uuid,
+			val newValuesBySpaceId: Map<Uuid, Int>,
 		) : TurnEvent
 
 		data class TurnEnded(
@@ -137,6 +176,13 @@ class GameSimulationService(
 		val turnOrder = players.map { it.id.value }.shuffled()
 		val startedGame = gameDao.startGame(gameId, turnOrder)
 
+		// The game only ever starts once (guarded by the turnOrder check above), so this is the
+		// one moment a per-game copy of the board's shops needs to be seeded -- see
+		// GameShopInformationDao.seedForGame.
+		if (startedGame != null) {
+			boardDao.findById(game.boardId.value)?.let { boardGraph -> gameShopInformationDao.seedForGame(gameId, boardGraph) }
+		}
+
 		// If the shuffle put one or more computer players at the front,
 		// nobody's ever going to roll the dice to kick things off for them
 		// -- play those turns out right now so the game doesn't stall before
@@ -151,12 +197,13 @@ class GameSimulationService(
 	 * Rolls the die for [playerId]'s turn and moves them forward that many
 	 * spaces -- automatically, one at a time, until either movement runs out
 	 * (ending the turn), a branch is reached and paused on ([choosePath]
-	 * picks up from there), or the game ends. Whichever computer players
-	 * immediately follow in turn order then get their own full turns played
-	 * out the same way, stopping once it's a human's turn again or the game
-	 * ends. The result is always at least one event (the roll) and is in
-	 * order, so the caller can report each one (e.g. as a broadcast per
-	 * entry) as it happens.
+	 * picks up from there), a purchase decision is reached and paused on
+	 * ([buyShop]/[declineShopPurchase] picks up from there), or the game
+	 * ends. Whichever computer players immediately follow in turn order then
+	 * get their own full turns played out the same way, stopping once it's a
+	 * human's turn again or the game ends. The result is always at least one
+	 * event (the roll) and is in order, so the caller can report each one
+	 * (e.g. as a broadcast per entry) as it happens.
 	 */
 	fun rollDice(gameId: Uuid, playerId: Uuid): Result<List<TurnEvent>> {
 		val game = currentTurnGame(gameId, playerId).getOrElse { return Result.failure(it) }
@@ -228,6 +275,35 @@ class GameSimulationService(
 		return Result.success(events)
 	}
 
+	/**
+	 * Buys the shop [playerId] is currently paused on (see
+	 * [TurnEvent.ShopPurchaseAvailable]) for its current price, deducted from their gold --
+	 * which can go negative, see PlayerStatesTable.currentGold. If this purchase brings the
+	 * player's owned count in that shop's district to 2 or more, every shop they own there
+	 * (including the one just bought) is recalculated per that district's progression (see
+	 * DistrictValueProgressionsTable). Ends the turn afterward and chains into any following
+	 * computer players' turns, exactly as [rollDice]/[choosePath] do.
+	 */
+	fun buyShop(gameId: Uuid, playerId: Uuid): Result<List<TurnEvent>> {
+		val (game, shop, playersById) = pendingShopPurchase(gameId, playerId).getOrElse { return Result.failure(it) }
+
+		val movement = endTurn(gameId, playerId, game, purchaseShop(gameId, playerId, shop))
+			.getOrElse { return Result.failure(it) }
+		val events = movement.events + chainComputerTurns(gameId, movement, playersById)
+
+		return Result.success(events)
+	}
+
+	/** Declines the pending purchase from [TurnEvent.ShopPurchaseAvailable] and ends the turn without buying. */
+	fun declineShopPurchase(gameId: Uuid, playerId: Uuid): Result<List<TurnEvent>> {
+		val (game, _, playersById) = pendingShopPurchase(gameId, playerId).getOrElse { return Result.failure(it) }
+
+		val movement = endTurn(gameId, playerId, game, emptyList()).getOrElse { return Result.failure(it) }
+		val events = movement.events + chainComputerTurns(gameId, movement, playersById)
+
+		return Result.success(events)
+	}
+
 	/** Validates that it's actually [playerId]'s turn to act right now, returning the game if so. */
 	private fun currentTurnGame(gameId: Uuid, playerId: Uuid): Result<Game> {
 		val game = gameDao.findById(gameId)
@@ -246,16 +322,42 @@ class GameSimulationService(
 		return Result.success(game)
 	}
 
+	/**
+	 * Validates that [playerId] actually has a shop purchase decision pending -- i.e. movement
+	 * ended this turn on an unowned shop (see [TurnEvent.ShopPurchaseAvailable]) -- for
+	 * [buyShop]/[declineShopPurchase]. currentMovementPoints is reused as the pause signal here
+	 * exactly like it is for a branch choice: 0 specifically (rather than null, or >0 for a
+	 * branch) means movement finished but the turn hasn't ended yet, waiting on this decision.
+	 */
+	private fun pendingShopPurchase(gameId: Uuid, playerId: Uuid): Result<Triple<Game, GameShopInformation, Map<Uuid, Player>>> {
+		val game = currentTurnGame(gameId, playerId).getOrElse { return Result.failure(it) }
+		if (game.currentMovementPoints != 0) {
+			return Result.failure(InvalidTurnException("Player $playerId has no shop purchase decision pending."))
+		}
+
+		val state = playerDao.findState(playerId)
+			?: return Result.failure(InvalidPlayerException("Player $playerId has no state."))
+		val spaceId = state.currentSpaceId?.value
+			?: return Result.failure(InvalidTurnException("Player $playerId has no current space."))
+		val shop = gameShopInformationDao.findByGameAndSpace(gameId, spaceId)?.takeIf { it.ownerId == null }
+			?: return Result.failure(InvalidTurnException("There's no shop purchase pending for player $playerId."))
+
+		val playersById = playerDao.findByGameId(gameId).associateBy { it.id.value }
+		return Result.success(Triple(game, shop, playersById))
+	}
+
 	private data class MovementResult(val events: List<TurnEvent>, val updatedGame: Game)
 
 	/**
 	 * Moves a player forward from [startingSpaceId] with [startingMovementPoints]
-	 * left to spend -- one space at a time -- stopping in one of three ways:
-	 * movement runs out (the turn ends), a computer player is moving and hits
-	 * a branch (picks randomly and keeps going, so this never actually
-	 * happens for one), or a human player hits a branch (pauses here,
-	 * persisting the remaining movement so a later [choosePath] call, even
-	 * after a reconnect, can pick up from it).
+	 * left to spend -- one space at a time -- stopping in one of four ways:
+	 * movement runs out on an ordinary space (the turn ends), it runs out on
+	 * an unowned shop (a human pauses for a purchase decision; a computer
+	 * decides immediately and the turn ends), a computer player is moving
+	 * and hits a branch (picks randomly and keeps going, so pausing never
+	 * actually happens for one), or a human player hits a branch (pauses
+	 * here, persisting the remaining movement so a later [choosePath] call,
+	 * even after a reconnect, can pick up from it).
 	 */
 	private fun advanceMovement(
 		gameId: Uuid,
@@ -292,11 +394,74 @@ class GameSimulationService(
 			currentSpaceId = chosenPath.toSpaceId.value
 		}
 
+		val unownedShop = gameShopInformationDao.findByGameAndSpace(gameId, currentSpaceId)?.takeIf { it.ownerId == null }
+		if (unownedShop != null) {
+			if (!isComputer) {
+				gameDao.setMovementPoints(gameId, 0)
+				events += TurnEvent.ShopPurchaseAvailable(playerId, currentSpaceId, unownedShop.currentValue)
+				return Result.success(MovementResult(events, game))
+			}
+
+			if (computerPlayer.shouldBuyShop(unownedShop)) {
+				events += purchaseShop(gameId, playerId, unownedShop)
+			}
+		}
+
+		return endTurn(gameId, playerId, game, events)
+	}
+
+	/** Advances turnNumber and appends [TurnEvent.TurnEnded] to [precedingEvents] -- the shared tail of every way a turn can finish. */
+	private fun endTurn(gameId: Uuid, playerId: Uuid, game: Game, precedingEvents: List<TurnEvent>): Result<MovementResult> {
 		val updatedGame = gameDao.advanceTurn(gameId)
 			?: return Result.failure(GameNotFoundException("Game $gameId does not exist."))
-		events += TurnEvent.TurnEnded(playerId, game.turnNumber, gameOver = updatedGame.turnNumber >= updatedGame.maxTurns)
+		val events = precedingEvents + TurnEvent.TurnEnded(playerId, game.turnNumber, gameOver = updatedGame.turnNumber >= updatedGame.maxTurns)
 		return Result.success(MovementResult(events, updatedGame))
 	}
+
+	/**
+	 * Pays [shop]'s current price out of [playerId]'s gold and hands them ownership, then -- if
+	 * that brought their owned count in [shop]'s district to 2 or more -- recalculates every
+	 * shop they own there per that district's progression (see DistrictValueProgressionsTable):
+	 * every shop they already owned gets existingShopBoostPercentage, and the one just bought
+	 * gets newShopBoostPercentage instead. Shops outside a district, or a purchase that's still
+	 * the player's only shop in one, have nothing to recalculate.
+	 */
+	private fun purchaseShop(gameId: Uuid, playerId: Uuid, shop: GameShopInformation): List<TurnEvent> {
+		val price = shop.currentValue
+		playerDao.adjustGold(playerId, -price)
+		gameShopInformationDao.setOwner(shop.id.value, playerId)
+
+		val events = mutableListOf<TurnEvent>(TurnEvent.ShopPurchased(playerId, shop.spaceId.value, price))
+
+		val districtId = shop.districtId
+		if (districtId != null) {
+			val ownedInDistrict = gameShopInformationDao.findOwnedByPlayerInDistrict(gameId, playerId, districtId)
+			val progression = if (ownedInDistrict.size >= MIN_SHOPS_OWNED_TO_RECALCULATE) {
+				boardDao.findDistrictValueProgression(districtId, ownedInDistrict.size)
+			} else {
+				null
+			}
+
+			if (progression != null) {
+				val newValuesBySpaceId = ownedInDistrict.associate { owned ->
+					val percentage = if (owned.id.value == shop.id.value) {
+						progression.newShopBoostPercentage
+					} else {
+						progression.existingShopBoostPercentage
+					}
+					val newValue = boosted(owned.currentValue, percentage)
+					gameShopInformationDao.setCurrentValue(owned.id.value, newValue)
+					owned.spaceId.value to newValue
+				}
+				events += TurnEvent.DistrictValuesRecalculated(playerId, districtId.value, newValuesBySpaceId)
+			}
+		}
+
+		return events
+	}
+
+	private fun boosted(value: Int, percentage: BigDecimal): Int =
+		(BigDecimal(value) * (BigDecimal.ONE + percentage)).setScale(0, RoundingMode.HALF_UP).toInt()
 
 	private fun applyMove(
 		playerId: Uuid,
@@ -375,5 +540,9 @@ class GameSimulationService(
 		events += movement.events
 
 		return Result.success(PlayedTurn(events, movement.updatedGame))
+	}
+
+	companion object {
+		private const val MIN_SHOPS_OWNED_TO_RECALCULATE = 2
 	}
 }

@@ -45,6 +45,28 @@ data class ChoiceRequiredEvent(
 	override val type: String = "choice_required",
 ) : GameEvent
 
+data class ShopPurchaseAvailableEvent(
+	val playerId: String,
+	val spaceId: String,
+	val price: Int,
+	override val type: String = "shop_purchase_available",
+) : GameEvent
+
+data class ShopPurchasedEvent(
+	val playerId: String,
+	val spaceId: String,
+	val price: Int,
+	override val type: String = "shop_purchased",
+) : GameEvent
+
+/** [newValuesBySpaceId] maps each recalculated shop's spaceId to its new currentValue. */
+data class DistrictValuesRecalculatedEvent(
+	val playerId: String,
+	val districtId: String,
+	val newValuesBySpaceId: Map<String, Int>,
+	override val type: String = "district_values_recalculated",
+) : GameEvent
+
 data class TurnEndedEvent(
 	val turnNumber: Int,
 	val playerId: String,

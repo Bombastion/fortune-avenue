@@ -57,6 +57,11 @@ class PlayerDao {
 		findStateEntity(playerId)?.apply { this.currentSpaceId = EntityID(spaceId, BoardSpacesTable) }
 	}
 
+	/** Adds [delta] (negative to spend) to a player's currentGold. Can go negative -- see PlayerStatesTable. */
+	fun adjustGold(playerId: Uuid, delta: Int): PlayerState? = transaction {
+		findStateEntity(playerId)?.apply { currentGold += delta }
+	}
+
 	// Not itself wrapped in a transaction -- only ever called from within one
 	// of the transaction {} blocks above.
 	private fun findStateEntity(playerId: Uuid): PlayerState? =

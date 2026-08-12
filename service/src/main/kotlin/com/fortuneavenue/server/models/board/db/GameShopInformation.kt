@@ -15,6 +15,7 @@ class GameShopInformation(id: EntityID<Uuid>) : UuidEntity(id) {
 	var baseValue by GameShopInformationTable.baseValue
 	var basePricePercentage by GameShopInformationTable.basePricePercentage
 	var ownerId by GameShopInformationTable.ownerId
+	var districtId by GameShopInformationTable.districtId
 	var currentValue by GameShopInformationTable.currentValue
 	var currentInvestment by GameShopInformationTable.currentInvestment
 	var maxCap by GameShopInformationTable.maxCap
