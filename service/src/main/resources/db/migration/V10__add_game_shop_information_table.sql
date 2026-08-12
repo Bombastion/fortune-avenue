@@ -11,7 +11,7 @@ CREATE TABLE game_shop_information (
     space_id UUID NOT NULL REFERENCES board_spaces(id) ON DELETE CASCADE,
     base_value INT NOT NULL,
     base_price_percentage NUMERIC(4, 4) NOT NULL,
-    -- Null until a player buys in.
+    -- Null until a player buys it
     owner_id UUID REFERENCES players(id) ON DELETE SET NULL,
     current_value INT NOT NULL,
     current_investment INT NOT NULL,
