@@ -1,5 +1,6 @@
 package com.fortuneavenue.server.service
 
+import com.fortuneavenue.server.dao.BoardDao
 import com.fortuneavenue.server.dao.GameDao
 import com.fortuneavenue.server.dao.PlayerDao
 import com.fortuneavenue.server.dao.UserDao
@@ -12,12 +13,12 @@ class PlayerService(
 	private val playerDao: PlayerDao,
 	private val gameDao: GameDao,
 	private val userDao: UserDao,
+	private val boardDao: BoardDao,
 ) {
 
 	fun addPlayer(gameId: Uuid, userId: Uuid?): Result<Player> {
-		if (gameDao.findById(gameId) == null) {
-			return Result.failure(GameNotFoundException("Game $gameId does not exist."))
-		}
+		val game = gameDao.findById(gameId)
+			?: return Result.failure(GameNotFoundException("Game $gameId does not exist."))
 
 		if (userId != null) {
 			if (userDao.findById(userId) == null) {
@@ -30,7 +31,13 @@ class PlayerService(
 			}
 		}
 
-		return Result.success(playerDao.create(gameId, userId))
+		// A new player starts with however much gold their game's board says every player
+		// starts with. The board is guaranteed to exist by a FK from games -> boards.
+		val startingGold = requireNotNull(boardDao.findStartingGold(game.boardId.value)) {
+			"Board ${game.boardId.value} for game $gameId no longer exists."
+		}
+
+		return Result.success(playerDao.create(gameId, userId, startingGold))
 	}
 
 	/** Returns null if [gameId] doesn't refer to a real game, an empty list if it does but has no players yet. */

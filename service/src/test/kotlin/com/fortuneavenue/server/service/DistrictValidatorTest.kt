@@ -18,6 +18,7 @@ class DistrictValidatorTest {
 		spaces = spaces,
 		paths = listOf(CreateBoardPathRequest(0, 0)),
 		startSpaceIndex = 0,
+		startingGold = 1000,
 		districts = districts,
 	)
 

@@ -14,10 +14,15 @@ import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.springframework.stereotype.Repository
 import kotlin.uuid.Uuid
 
+// Real current gold always starts out as the player's game's board.startingGold (see
+// PlayerService.addPlayer) -- this only exists so DAO-level tests that don't care about gold at
+// all don't have to invent a number.
+private const val DEFAULT_CURRENT_GOLD = 1000
+
 @Repository
 class PlayerDao {
 
-	fun create(gameId: Uuid, userId: Uuid? = null): Player = transaction {
+	fun create(gameId: Uuid, userId: Uuid? = null, currentGold: Int = DEFAULT_CURRENT_GOLD): Player = transaction {
 		val player = Player.new {
 			this.gameId = EntityID(gameId, GamesTable)
 			this.userId = userId?.let { EntityID(it, UsersTable) }
@@ -26,6 +31,7 @@ class PlayerDao {
 		// Every player gets state the moment it exists
 		PlayerState.new {
 			this.playerId = player.id
+			this.currentGold = currentGold
 		}
 
 		player

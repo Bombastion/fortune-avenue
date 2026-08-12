@@ -23,6 +23,11 @@ import org.springframework.stereotype.Repository
 import java.math.BigDecimal
 import kotlin.uuid.Uuid
 
+// Real starting gold amounts are always caller-supplied (CreateBoardRequest requires it, and
+// BoardService validates it's positive) -- this only exists so DAO-level tests that don't care
+// about gold at all don't have to invent a number.
+private const val DEFAULT_STARTING_GOLD = 1000
+
 @Repository
 class BoardDao {
 
@@ -42,12 +47,18 @@ class BoardDao {
 		pathInputs: List<PathInput>,
 		startIndex: Int,
 		districtInputs: List<DistrictInput> = emptyList(),
+		startingGold: Int = DEFAULT_STARTING_GOLD,
 	): BoardGraph = transaction {
 		// start_space_id is a plain uuid column, not a typed reference() (see the
 		// comment on BoardsTable), but Board requires it to exist. We do some
 		// wonky stuff with flushing to make sure the space exists, then update
 		// the board.
-		val board = Board.new { this.name = name }
+		val board = Board.new {
+			this.name = name
+			// `this.` is required here too -- create()'s own `startingGold` parameter
+			// would otherwise shadow the entity's `startingGold` property.
+			this.startingGold = startingGold
+		}
 		board.flush()
 
 		// Districts have to exist (and be flushed to the DB) before spaces can
@@ -127,6 +138,11 @@ class BoardDao {
 		if (districts.isEmpty()) return emptyList()
 		val districtIds = districts.map { it.id }
 		return DistrictValueProgression.find { DistrictValueProgressionsTable.districtId inList districtIds }.toList()
+	}
+
+	/** A single-column lookup for [com.fortuneavenue.server.service.PlayerService] -- cheaper than loading a full [BoardGraph] via [findById]. */
+	fun findStartingGold(id: Uuid): Int? = transaction {
+		Board.findById(id)?.startingGold
 	}
 
 	fun findById(id: Uuid): BoardGraph? = transaction {

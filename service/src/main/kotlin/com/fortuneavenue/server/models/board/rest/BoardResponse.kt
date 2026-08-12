@@ -35,6 +35,7 @@ data class BoardResponse(
 	val id: String,
 	val name: String,
 	val startSpaceId: String,
+	val startingGold: Int,
 	val spaces: List<BoardSpaceResponse>,
 	val paths: List<BoardPathResponse>,
 	val districts: List<DistrictResponse> = emptyList(),
@@ -50,6 +51,7 @@ fun BoardGraph.toResponse(): BoardResponse {
 		startSpaceId = requireNotNull(board.startSpaceId) {
 			"Board ${board.id.value} has no start space set."
 		}.toString(),
+		startingGold = board.startingGold,
 		spaces = spaces.map { space ->
 			val shop = shopInformationBySpaceId[space.id.value]
 			BoardSpaceResponse(

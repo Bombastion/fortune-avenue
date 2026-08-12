@@ -50,6 +50,24 @@ class BoardDaoTest : DatabaseTest() {
 	}
 
 	@Test
+	fun `create persists startingGold, and findById returns it`() {
+		val created = boardDao.create(
+			name = "gold-board-${Uuid.random()}",
+			spaceInputs = listOf(BoardDao.SpaceInput(SpaceType.BASIC)),
+			pathInputs = emptyList(),
+			startIndex = 0,
+			startingGold = 2500,
+		)
+
+		assertThat(created.board.startingGold).isEqualTo(2500)
+
+		val found = boardDao.findById(created.board.id.value)
+
+		assertThat(found).isNotNull()
+		assertThat(found!!.board.startingGold).isEqualTo(2500)
+	}
+
+	@Test
 	fun `create persists shop information for SHOP spaces only, and findById returns it`() {
 		val spaces = listOf(
 			BoardDao.SpaceInput(SpaceType.BASIC),

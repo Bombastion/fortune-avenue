@@ -45,6 +45,7 @@ class BoardControllerTest : DatabaseTest() {
 			CreateBoardPathRequest(2, 0),
 		),
 		startSpaceIndex = 0,
+		startingGold = 1000,
 	)
 
 	@Test
@@ -60,6 +61,17 @@ class BoardControllerTest : DatabaseTest() {
 		assertThat(body.spaces).hasSize(3)
 		assertThat(body.paths).hasSize(3)
 		assertThat(body.spaces.map { it.id }).contains(body.startSpaceId)
+		assertThat(body.startingGold).isEqualTo(1000)
+	}
+
+	@Test
+	fun `creating a board with a zero or negative startingGold returns 400`() {
+		val request = validRequest("bad-gold-${Uuid.random()}").copy(startingGold = 0)
+
+		val response = restTemplate.postForEntity<ErrorResponse>("/boards", request)
+
+		assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
+		assertThat(response.body?.message).isNotBlank()
 	}
 
 	@Test

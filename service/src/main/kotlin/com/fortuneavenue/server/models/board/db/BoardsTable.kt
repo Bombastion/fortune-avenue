@@ -11,4 +11,7 @@ object BoardsTable : UuidTable("boards") {
 	// and two Exposed Table objects can't cleanly reference each other in their
 	// initializers. The FK still exists at the database level, however
 	val startSpaceId = uuid("start_space_id").nullable()
+
+	// How much gold every player starts a game on this board with -- see player_states.current_gold.
+	val startingGold = integer("starting_gold")
 }

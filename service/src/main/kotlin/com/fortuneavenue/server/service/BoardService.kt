@@ -16,9 +16,12 @@ class BoardService(
 	fun createBoard(request: CreateBoardRequest): Result<BoardGraph> {
 		val edges = request.paths.map { BoardGraphValidator.Edge(from = it.from, to = it.to) }
 
+		val startingGoldErrors = if (request.startingGold > 0) emptyList() else listOf("startingGold must be a positive integer.")
+
 		val errors = ShopSpaceValidator.validate(request.spaces) +
 			DistrictValidator.validate(request) +
 			DistrictProgressionValidator.validate(request) +
+			startingGoldErrors +
 			BoardGraphValidator.validate(
 				spaceCount = request.spaces.size,
 				edges = edges,
@@ -41,6 +44,7 @@ class BoardService(
 			},
 			pathInputs = request.paths.map { BoardDao.PathInput(it.from, it.to, it.branchOrder) },
 			startIndex = request.startSpaceIndex,
+			startingGold = request.startingGold,
 			districtInputs = request.districts.map { district ->
 				BoardDao.DistrictInput(
 					name = district.name,

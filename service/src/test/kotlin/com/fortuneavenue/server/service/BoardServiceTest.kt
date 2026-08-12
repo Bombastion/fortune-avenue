@@ -47,6 +47,7 @@ class BoardServiceTest {
 			CreateBoardPathRequest(2, 0),
 		),
 		startSpaceIndex = 0,
+		startingGold = 1000,
 	)
 
 	@Test
@@ -241,6 +242,39 @@ class BoardServiceTest {
 
 		assertThat(result.isFailure).isTrue()
 		assertThat(result.exceptionOrNull()).isInstanceOf(InvalidBoardException::class.java)
+		verifyNoInteractions(boardDao)
+	}
+
+	// --- startingGold ---
+
+	@Test
+	fun `a board's startingGold is passed through to the DAO`() {
+		val request = validRequest().copy(startingGold = 2500)
+		val expectedGraph = mock(BoardGraph::class.java)
+
+		val expectedSpaceInputs = request.spaces.map { BoardDao.SpaceInput(it.spaceType) }
+		val expectedPathInputs = request.paths.map { BoardDao.PathInput(it.from, it.to, it.branchOrder) }
+
+		given(
+			boardDao.create(
+				name = request.name,
+				spaceInputs = expectedSpaceInputs,
+				pathInputs = expectedPathInputs,
+				startIndex = request.startSpaceIndex,
+				startingGold = 2500,
+			),
+		).willReturn(expectedGraph)
+
+		val result = boardService.createBoard(request)
+
+		assertThat(result.isSuccess).isTrue()
+		assertThat(result.getOrNull()).isSameAs(expectedGraph)
+	}
+
+	@Test
+	fun `a zero or negative startingGold is rejected without ever touching the DAO`() {
+		assertThat(boardService.createBoard(validRequest().copy(startingGold = 0)).isFailure).isTrue()
+		assertThat(boardService.createBoard(validRequest().copy(startingGold = -1)).isFailure).isTrue()
 		verifyNoInteractions(boardDao)
 	}
 

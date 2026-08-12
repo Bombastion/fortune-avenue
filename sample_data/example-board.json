@@ -21,5 +21,6 @@
     { "from": 4, "to": 5, "branchOrder": 0 },
     { "from": 5, "to": 0, "branchOrder": 0 }
   ],
-  "startSpaceIndex": 0
+  "startSpaceIndex": 0,
+  "startingGold": 1500
 }

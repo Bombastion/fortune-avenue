@@ -92,6 +92,7 @@ class GameWebSocketHandlerTest : DatabaseTest() {
 				CreateBoardPathRequest(2, 0),
 			),
 			startSpaceIndex = 0,
+			startingGold = 1000,
 		),
 	).body!!
 
@@ -116,6 +117,7 @@ class GameWebSocketHandlerTest : DatabaseTest() {
 				CreateBoardPathRequest(2, 0),
 			),
 			startSpaceIndex = 0,
+			startingGold = 1000,
 		),
 	).body!!
 

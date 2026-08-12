@@ -57,10 +57,12 @@ data class CreateDistrictRequest(
 	val progressions: List<CreateDistrictProgressionRequest> = emptyList(),
 )
 
+/** [startingGold] must be a positive integer -- see [BoardService]. Every player in a game on this board starts with this much. */
 data class CreateBoardRequest(
 	val name: String,
 	val spaces: List<CreateBoardSpaceRequest>,
 	val paths: List<CreateBoardPathRequest>,
 	val startSpaceIndex: Int,
+	val startingGold: Int,
 	val districts: List<CreateDistrictRequest> = emptyList(),
 )

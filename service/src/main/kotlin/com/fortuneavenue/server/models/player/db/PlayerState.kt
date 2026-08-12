@@ -11,4 +11,5 @@ class PlayerState(id: EntityID<Uuid>) : UuidEntity(id) {
 	var playerId by PlayerStatesTable.playerId
 	var currentSpaceId by PlayerStatesTable.currentSpaceId
 	var status by PlayerStatesTable.status
+	var currentGold by PlayerStatesTable.currentGold
 }

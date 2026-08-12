@@ -10,4 +10,5 @@ class Board(id: EntityID<Uuid>) : UuidEntity(id) {
 
 	var name by BoardsTable.name
 	var startSpaceId by BoardsTable.startSpaceId
+	var startingGold by BoardsTable.startingGold
 }
