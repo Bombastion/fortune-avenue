@@ -32,16 +32,37 @@ data class CreateBoardPathRequest(
 	val branchOrder: Int = 0,
 )
 
-/** [colorHex] must be exactly 6 hex characters (0-9, A-F), e.g. "FF00AA". See [DistrictValidator]. */
+/**
+ * [ownedShopCount] is the count of shops a player has just reached in the district (2, 3, 4, ...
+ * -- never 1, since a single shop has nothing to boost off of yet). [existingShopBoostPercentage]
+ * and [newShopBoostPercentage] must each be a positive decimal with exactly 4 digits
+ */
+data class CreateDistrictProgressionRequest(
+	val ownedShopCount: Int,
+	val existingShopBoostPercentage: BigDecimal,
+	val newShopBoostPercentage: BigDecimal,
+)
+
+/**
+ * [colorHex] must be exactly 6 hex characters (0-9, A-F), e.g. "FF00AA". See [DistrictValidator].
+ *
+ * [progressions] defines how shop values in this district scale as a player accumulates more of
+ * them: a district with at least 2 spaces (see [CreateBoardRequest.spaces]'s districtIndex) must
+ * define exactly one entry for every ownedShopCount from 2 up to that district's total space
+ * count; a district with fewer than 2 spaces must define none. See [DistrictProgressionValidator].
+ */
 data class CreateDistrictRequest(
 	val name: String,
 	val colorHex: String,
+	val progressions: List<CreateDistrictProgressionRequest> = emptyList(),
 )
 
+/** [startingGold] must be a positive integer -- see [BoardService]. Every player in a game on this board starts with this much. */
 data class CreateBoardRequest(
 	val name: String,
 	val spaces: List<CreateBoardSpaceRequest>,
 	val paths: List<CreateBoardPathRequest>,
 	val startSpaceIndex: Int,
+	val startingGold: Int,
 	val districts: List<CreateDistrictRequest> = emptyList(),
 )

@@ -8,17 +8,27 @@ import com.fortuneavenue.server.models.board.db.BoardSpace
 import com.fortuneavenue.server.models.board.db.BoardSpacesTable
 import com.fortuneavenue.server.models.board.db.BoardsTable
 import com.fortuneavenue.server.models.board.db.District
+import com.fortuneavenue.server.models.board.db.DistrictValueProgression
+import com.fortuneavenue.server.models.board.db.DistrictValueProgressionsTable
 import com.fortuneavenue.server.models.board.db.DistrictsTable
 import com.fortuneavenue.server.models.board.db.ShopInformation
 import com.fortuneavenue.server.models.board.db.ShopInformationTable
 import com.fortuneavenue.server.models.board.db.SpaceType
 import org.jetbrains.exposed.v1.core.SortOrder
+import org.jetbrains.exposed.v1.core.and
+import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.core.inList
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.springframework.stereotype.Repository
 import java.math.BigDecimal
 import kotlin.uuid.Uuid
+
+// Real starting gold amounts are always caller-supplied (CreateBoardRequest requires it, and
+// BoardService validates it's positive) -- this only exists so DAO-level tests that don't care
+// about gold at all don't have to invent a number.
+private const val DEFAULT_STARTING_GOLD = 1000
 
 @Repository
 class BoardDao {
@@ -30,7 +40,8 @@ class BoardDao {
 		val districtIndex: Int? = null,
 	)
 	data class PathInput(val fromIndex: Int, val toIndex: Int, val branchOrder: Int)
-	data class DistrictInput(val name: String, val colorHex: String)
+	data class ProgressionInput(val ownedShopCount: Int, val existingShopBoostPercentage: BigDecimal, val newShopBoostPercentage: BigDecimal)
+	data class DistrictInput(val name: String, val colorHex: String, val progressionInputs: List<ProgressionInput> = emptyList())
 
 	fun create(
 		name: String,
@@ -38,12 +49,18 @@ class BoardDao {
 		pathInputs: List<PathInput>,
 		startIndex: Int,
 		districtInputs: List<DistrictInput> = emptyList(),
+		startingGold: Int = DEFAULT_STARTING_GOLD,
 	): BoardGraph = transaction {
 		// start_space_id is a plain uuid column, not a typed reference() (see the
 		// comment on BoardsTable), but Board requires it to exist. We do some
 		// wonky stuff with flushing to make sure the space exists, then update
 		// the board.
-		val board = Board.new { this.name = name }
+		val board = Board.new {
+			this.name = name
+			// `this.` is required here too -- create()'s own `startingGold` parameter
+			// would otherwise shadow the entity's `startingGold` property.
+			this.startingGold = startingGold
+		}
 		board.flush()
 
 		// Districts have to exist (and be flushed to the DB) before spaces can
@@ -59,6 +76,17 @@ class BoardDao {
 			}
 		}
 		districts.firstOrNull()?.flush()
+
+		val districtProgressions = districtInputs.zip(districts).flatMap { (input, district) ->
+			input.progressionInputs.map { progressionInput ->
+				DistrictValueProgression.new {
+					districtId = district.id
+					ownedShopCount = progressionInput.ownedShopCount
+					existingShopBoostPercentage = progressionInput.existingShopBoostPercentage
+					newShopBoostPercentage = progressionInput.newShopBoostPercentage
+				}
+			}
+		}
 
 		val spaces = spaceInputs.map { input ->
 			BoardSpace.new {
@@ -98,7 +126,33 @@ class BoardDao {
 			}
 		}
 
-		BoardGraph(board = board, spaces = spaces, paths = paths, shopInformation = shopInformation, districts = districts)
+		BoardGraph(
+			board = board,
+			spaces = spaces,
+			paths = paths,
+			shopInformation = shopInformation,
+			districts = districts,
+			districtProgressions = districtProgressions,
+		)
+	}
+
+	private fun districtProgressionsFor(districts: List<District>): List<DistrictValueProgression> {
+		if (districts.isEmpty()) return emptyList()
+		val districtIds = districts.map { it.id }
+		return DistrictValueProgression.find { DistrictValueProgressionsTable.districtId inList districtIds }.toList()
+	}
+
+	/** A single-column lookup for [com.fortuneavenue.server.service.PlayerService] -- cheaper than loading a full [BoardGraph] via [findById]. */
+	fun findStartingGold(id: Uuid): Int? = transaction {
+		Board.findById(id)?.startingGold
+	}
+
+	/** The progression row for a district at a specific owned-shop count, if one's been defined -- see [GameSimulationService][com.fortuneavenue.server.service.GameSimulationService]'s shop purchase handling. */
+	fun findDistrictValueProgression(districtId: EntityID<Uuid>, ownedShopCount: Int): DistrictValueProgression? = transaction {
+		DistrictValueProgression.find {
+			(DistrictValueProgressionsTable.districtId eq districtId) and
+				(DistrictValueProgressionsTable.ownedShopCount eq ownedShopCount)
+		}.firstOrNull()
 	}
 
 	fun findById(id: Uuid): BoardGraph? = transaction {
@@ -107,8 +161,16 @@ class BoardDao {
 		val paths = BoardPath.find { BoardPathsTable.boardId eq board.id }.toList()
 		val shopInformation = ShopInformation.find { ShopInformationTable.boardId eq board.id }.toList()
 		val districts = District.find { DistrictsTable.boardId eq board.id }.toList()
+		val districtProgressions = districtProgressionsFor(districts)
 
-		BoardGraph(board = board, spaces = spaces, paths = paths, shopInformation = shopInformation, districts = districts)
+		BoardGraph(
+			board = board,
+			spaces = spaces,
+			paths = paths,
+			shopInformation = shopInformation,
+			districts = districts,
+			districtProgressions = districtProgressions,
+		)
 	}
 
 	/** Boards are sorted by name until we add sort criteria. */
@@ -125,7 +187,15 @@ class BoardDao {
 			val paths = BoardPath.find { BoardPathsTable.boardId eq board.id }.toList()
 			val shopInformation = ShopInformation.find { ShopInformationTable.boardId eq board.id }.toList()
 			val districts = District.find { DistrictsTable.boardId eq board.id }.toList()
-			BoardGraph(board = board, spaces = spaces, paths = paths, shopInformation = shopInformation, districts = districts)
+			val districtProgressions = districtProgressionsFor(districts)
+			BoardGraph(
+				board = board,
+				spaces = spaces,
+				paths = paths,
+				shopInformation = shopInformation,
+				districts = districts,
+				districtProgressions = districtProgressions,
+			)
 		}
 	}
 

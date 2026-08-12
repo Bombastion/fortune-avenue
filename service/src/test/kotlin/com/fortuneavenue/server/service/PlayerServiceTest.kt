@@ -1,8 +1,10 @@
 package com.fortuneavenue.server.service
 
+import com.fortuneavenue.server.dao.BoardDao
 import com.fortuneavenue.server.dao.GameDao
 import com.fortuneavenue.server.dao.PlayerDao
 import com.fortuneavenue.server.dao.UserDao
+import com.fortuneavenue.server.models.board.db.BoardsTable
 import com.fortuneavenue.server.models.game.db.Game
 import com.fortuneavenue.server.models.player.db.Player
 import com.fortuneavenue.server.models.user.db.User
@@ -14,7 +16,9 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
 import org.mockito.BDDMockito.given
 import org.mockito.Mock
+import org.mockito.Mockito.lenient
 import org.mockito.Mockito.mock
+import org.mockito.Mockito.verify
 import org.mockito.Mockito.verifyNoInteractions
 import org.mockito.junit.jupiter.MockitoExtension
 import kotlin.uuid.Uuid
@@ -31,9 +35,14 @@ class PlayerServiceTest {
 	@Mock
 	lateinit var userDao: UserDao
 
+	@Mock
+	lateinit var boardDao: BoardDao
+
 	private lateinit var playerService: PlayerService
 
 	private val gameId = Uuid.random()
+	private val boardId = Uuid.random()
+	private val startingGold = 1500
 
 	// Just needs *a* UuidTable to build EntityIDs against for stubbing --
 	// which table is irrelevant since these ids are never resolved against
@@ -46,21 +55,29 @@ class PlayerServiceTest {
 		return player
 	}
 
-	/** Stubs gameDao so [gameId] looks like a real, existing game. */
+	/**
+	 * Stubs gameDao/boardDao so [gameId] looks like a real, existing game on a real board with
+	 * [startingGold]. game.boardId and the boardDao stub are both lenient() since several tests
+	 * (getPlayers, and addPlayer's early-exit failure paths) never get far enough into addPlayer
+	 * to actually look the board up.
+	 */
 	private fun stubExistingGame() {
-		given(gameDao.findById(gameId)).willReturn(mock(Game::class.java))
+		val game = mock(Game::class.java)
+		lenient().`when`(game.boardId).thenReturn(EntityID(boardId, BoardsTable))
+		given(gameDao.findById(gameId)).willReturn(game)
+		lenient().`when`(boardDao.findStartingGold(boardId)).thenReturn(startingGold)
 	}
 
 	@BeforeEach
 	fun setUp() {
-		playerService = PlayerService(playerDao, gameDao, userDao)
+		playerService = PlayerService(playerDao, gameDao, userDao, boardDao)
 	}
 
 	@Test
 	fun `addPlayer with no userId persists a player with no user, without consulting UserDao`() {
 		stubExistingGame()
 		val createdPlayer = mock(Player::class.java)
-		given(playerDao.create(gameId, null)).willReturn(createdPlayer)
+		given(playerDao.create(gameId, null, startingGold)).willReturn(createdPlayer)
 
 		val result = playerService.addPlayer(gameId, null)
 
@@ -70,13 +87,24 @@ class PlayerServiceTest {
 	}
 
 	@Test
+	fun `addPlayer seeds the new player's currentGold from the board's startingGold`() {
+		stubExistingGame()
+		val createdPlayer = mock(Player::class.java)
+		given(playerDao.create(gameId, null, startingGold)).willReturn(createdPlayer)
+
+		playerService.addPlayer(gameId, null)
+
+		verify(playerDao).create(gameId, null, startingGold)
+	}
+
+	@Test
 	fun `addPlayer with a real, not-yet-seated userId persists the player`() {
 		stubExistingGame()
 		val userId = Uuid.random()
 		given(userDao.findById(userId)).willReturn(mock(User::class.java))
 		given(playerDao.findByGameId(gameId)).willReturn(emptyList())
 		val createdPlayer = mock(Player::class.java)
-		given(playerDao.create(gameId, userId)).willReturn(createdPlayer)
+		given(playerDao.create(gameId, userId, startingGold)).willReturn(createdPlayer)
 
 		val result = playerService.addPlayer(gameId, userId)
 
@@ -125,6 +153,7 @@ class PlayerServiceTest {
 		assertThat(result.exceptionOrNull()).isInstanceOf(GameNotFoundException::class.java)
 		verifyNoInteractions(userDao)
 		verifyNoInteractions(playerDao)
+		verifyNoInteractions(boardDao)
 	}
 
 	@Test

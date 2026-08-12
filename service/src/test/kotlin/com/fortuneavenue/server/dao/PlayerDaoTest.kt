@@ -49,16 +49,44 @@ class PlayerDaoTest : DatabaseTest() {
 	}
 
 	@Test
-	fun `create also persists state for the new player, with no position yet and status WAITING`() {
+	fun `create also persists state for the new player, with no position yet, status WAITING, and the given currentGold`() {
 		val game = createGame()
 
-		val created = playerDao.create(gameId = game.id.value)
+		val created = playerDao.create(gameId = game.id.value, currentGold = 1500)
 		val state = playerDao.findState(created.id.value)
 
 		assertThat(state).isNotNull()
 		assertThat(state!!.playerId.value).isEqualTo(created.id.value)
 		assertThat(state.currentSpaceId).isNull()
 		assertThat(state.status).isEqualTo(PlayerStatus.WAITING)
+		assertThat(state.currentGold).isEqualTo(1500)
+	}
+
+	@Test
+	fun `create allows a negative currentGold -- a player can owe more than they have on hand`() {
+		val game = createGame()
+
+		val created = playerDao.create(gameId = game.id.value, currentGold = -250)
+
+		assertThat(playerDao.findState(created.id.value)!!.currentGold).isEqualTo(-250)
+	}
+
+	@Test
+	fun `adjustGold adds a positive or negative delta to currentGold, allowing it to go negative`() {
+		val player = playerDao.create(gameId = createGame().id.value, currentGold = 100)
+
+		playerDao.adjustGold(player.id.value, -30)
+		assertThat(playerDao.findState(player.id.value)!!.currentGold).isEqualTo(70)
+
+		playerDao.adjustGold(player.id.value, -100)
+		assertThat(playerDao.findState(player.id.value)!!.currentGold).isEqualTo(-30)
+	}
+
+	@Test
+	fun `adjustGold returns null for a player id that does not exist`() {
+		val result = playerDao.adjustGold(Uuid.random(), 10)
+
+		assertThat(result).isNull()
 	}
 
 	@Test

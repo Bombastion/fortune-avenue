@@ -6,6 +6,7 @@ import com.fortuneavenue.server.models.board.db.SpaceType
 import com.fortuneavenue.server.models.board.rest.CreateBoardPathRequest
 import com.fortuneavenue.server.models.board.rest.CreateBoardRequest
 import com.fortuneavenue.server.models.board.rest.CreateBoardSpaceRequest
+import com.fortuneavenue.server.models.board.rest.CreateDistrictProgressionRequest
 import com.fortuneavenue.server.models.board.rest.CreateDistrictRequest
 import com.fortuneavenue.server.models.common.rest.SortDirection
 import org.assertj.core.api.Assertions.assertThat
@@ -46,6 +47,7 @@ class BoardServiceTest {
 			CreateBoardPathRequest(2, 0),
 		),
 		startSpaceIndex = 0,
+		startingGold = 1000,
 	)
 
 	@Test
@@ -186,6 +188,93 @@ class BoardServiceTest {
 
 		assertThat(result.isFailure).isTrue()
 		assertThat(result.exceptionOrNull()).isInstanceOf(InvalidBoardException::class.java)
+		verifyNoInteractions(boardDao)
+	}
+
+	@Test
+	fun `a board with complete district progressions is validated then persisted via the DAO`() {
+		val progression = CreateDistrictProgressionRequest(2, BigDecimal("0.1000"), BigDecimal("0.1500"))
+		val request = validRequest().let { req ->
+			req.copy(
+				districts = listOf(CreateDistrictRequest("Red", "FF0000", progressions = listOf(progression))),
+				spaces = req.spaces.mapIndexed { index, space -> if (index <= 1) space.copy(districtIndex = 0) else space },
+			)
+		}
+		val expectedGraph = mock(BoardGraph::class.java)
+
+		val expectedSpaceInputs = request.spaces.map {
+			BoardDao.SpaceInput(
+				spaceType = it.spaceType,
+				baseValue = it.baseValue,
+				basePricePercentage = it.basePricePercentage,
+				districtIndex = it.districtIndex,
+			)
+		}
+		val expectedPathInputs = request.paths.map { BoardDao.PathInput(it.from, it.to, it.branchOrder) }
+		val expectedDistrictInputs = listOf(
+			BoardDao.DistrictInput(
+				name = "Red",
+				colorHex = "FF0000",
+				progressionInputs = listOf(BoardDao.ProgressionInput(2, BigDecimal("0.1000"), BigDecimal("0.1500"))),
+			),
+		)
+
+		given(
+			boardDao.create(request.name, expectedSpaceInputs, expectedPathInputs, request.startSpaceIndex, expectedDistrictInputs),
+		).willReturn(expectedGraph)
+
+		val result = boardService.createBoard(request)
+
+		assertThat(result.isSuccess).isTrue()
+		assertThat(result.getOrNull()).isSameAs(expectedGraph)
+	}
+
+	@Test
+	fun `a district missing required progression levels is rejected without ever touching the DAO`() {
+		val request = validRequest().let { req ->
+			req.copy(
+				districts = listOf(CreateDistrictRequest("Red", "FF0000")),
+				spaces = req.spaces.mapIndexed { index, space -> if (index <= 1) space.copy(districtIndex = 0) else space },
+			)
+		}
+
+		val result = boardService.createBoard(request)
+
+		assertThat(result.isFailure).isTrue()
+		assertThat(result.exceptionOrNull()).isInstanceOf(InvalidBoardException::class.java)
+		verifyNoInteractions(boardDao)
+	}
+
+	// --- startingGold ---
+
+	@Test
+	fun `a board's startingGold is passed through to the DAO`() {
+		val request = validRequest().copy(startingGold = 2500)
+		val expectedGraph = mock(BoardGraph::class.java)
+
+		val expectedSpaceInputs = request.spaces.map { BoardDao.SpaceInput(it.spaceType) }
+		val expectedPathInputs = request.paths.map { BoardDao.PathInput(it.from, it.to, it.branchOrder) }
+
+		given(
+			boardDao.create(
+				name = request.name,
+				spaceInputs = expectedSpaceInputs,
+				pathInputs = expectedPathInputs,
+				startIndex = request.startSpaceIndex,
+				startingGold = 2500,
+			),
+		).willReturn(expectedGraph)
+
+		val result = boardService.createBoard(request)
+
+		assertThat(result.isSuccess).isTrue()
+		assertThat(result.getOrNull()).isSameAs(expectedGraph)
+	}
+
+	@Test
+	fun `a zero or negative startingGold is rejected without ever touching the DAO`() {
+		assertThat(boardService.createBoard(validRequest().copy(startingGold = 0)).isFailure).isTrue()
+		assertThat(boardService.createBoard(validRequest().copy(startingGold = -1)).isFailure).isTrue()
 		verifyNoInteractions(boardDao)
 	}
 

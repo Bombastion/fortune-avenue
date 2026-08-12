@@ -50,6 +50,11 @@ tasks.withType<KotlinCompile> {
 tasks.withType<Test> {
 	useJUnitPlatform()
 	jvmArgs("--enable-native-access=ALL-UNNAMED")
+	// Kills any individual test method that hangs instead of letting it block the whole
+	// suite (and `make test`) forever. Reported as a timeout failure for that test only --
+	// everything else still runs. Override per-test with @Timeout if a specific test
+	// legitimately needs longer.
+	systemProperty("junit.jupiter.execution.timeout.default", "10s")
 }
 
 tasks.named<BootRun>("bootRun") {

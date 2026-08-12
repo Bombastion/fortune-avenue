@@ -50,6 +50,24 @@ class BoardDaoTest : DatabaseTest() {
 	}
 
 	@Test
+	fun `create persists startingGold, and findById returns it`() {
+		val created = boardDao.create(
+			name = "gold-board-${Uuid.random()}",
+			spaceInputs = listOf(BoardDao.SpaceInput(SpaceType.BASIC)),
+			pathInputs = emptyList(),
+			startIndex = 0,
+			startingGold = 2500,
+		)
+
+		assertThat(created.board.startingGold).isEqualTo(2500)
+
+		val found = boardDao.findById(created.board.id.value)
+
+		assertThat(found).isNotNull()
+		assertThat(found!!.board.startingGold).isEqualTo(2500)
+	}
+
+	@Test
 	fun `create persists shop information for SHOP spaces only, and findById returns it`() {
 		val spaces = listOf(
 			BoardDao.SpaceInput(SpaceType.BASIC),
@@ -113,6 +131,78 @@ class BoardDaoTest : DatabaseTest() {
 		assertThat(found).isNotNull()
 		assertThat(found!!.districts).hasSize(1)
 		assertThat(found.spaces.first { it.id == created.spaces[0].id }.districtId).isEqualTo(district.id)
+	}
+
+	@Test
+	fun `create persists district progressions and findById returns them`() {
+		val districts = listOf(
+			BoardDao.DistrictInput(
+				name = "Red",
+				colorHex = "FF0000",
+				progressionInputs = listOf(
+					BoardDao.ProgressionInput(2, BigDecimal("0.1000"), BigDecimal("0.1500")),
+					BoardDao.ProgressionInput(3, BigDecimal("0.0500"), BigDecimal("0.1000")),
+				),
+			),
+		)
+		val spaces = listOf(
+			BoardDao.SpaceInput(SpaceType.BASIC, districtIndex = 0),
+			BoardDao.SpaceInput(SpaceType.BASIC, districtIndex = 0),
+			BoardDao.SpaceInput(SpaceType.BASIC, districtIndex = 0),
+		)
+		val paths = listOf(
+			BoardDao.PathInput(0, 1, 0),
+			BoardDao.PathInput(1, 2, 0),
+			BoardDao.PathInput(2, 0, 0),
+		)
+
+		val created = boardDao.create(
+			name = "progression-board-${Uuid.random()}",
+			spaceInputs = spaces,
+			pathInputs = paths,
+			startIndex = 0,
+			districtInputs = districts,
+		)
+
+		assertThat(created.districtProgressions).hasSize(2)
+		val districtId = created.districts.single().id
+		assertThat(created.districtProgressions).allMatch { it.districtId == districtId }
+		assertThat(created.districtProgressions.map { it.ownedShopCount }).containsExactlyInAnyOrder(2, 3)
+
+		val found = boardDao.findById(created.board.id.value)
+
+		assertThat(found).isNotNull()
+		assertThat(found!!.districtProgressions).hasSize(2)
+		assertThat(found.districtProgressions.map { it.ownedShopCount }).containsExactlyInAnyOrder(2, 3)
+	}
+
+	@Test
+	fun `findDistrictValueProgression finds the row for a district and owned count, or null if none was defined`() {
+		val districts = listOf(
+			BoardDao.DistrictInput(
+				name = "Red",
+				colorHex = "FF0000",
+				progressionInputs = listOf(BoardDao.ProgressionInput(2, BigDecimal("0.1000"), BigDecimal("0.1500"))),
+			),
+		)
+		val created = boardDao.create(
+			name = "progression-lookup-board-${Uuid.random()}",
+			spaceInputs = listOf(
+				BoardDao.SpaceInput(SpaceType.BASIC, districtIndex = 0),
+				BoardDao.SpaceInput(SpaceType.BASIC, districtIndex = 0),
+			),
+			pathInputs = listOf(BoardDao.PathInput(0, 1, 0), BoardDao.PathInput(1, 0, 0)),
+			startIndex = 0,
+			districtInputs = districts,
+		)
+		val districtId = created.districts.single().id
+
+		val found = boardDao.findDistrictValueProgression(districtId, 2)
+		assertThat(found).isNotNull()
+		assertThat(found!!.existingShopBoostPercentage).isEqualByComparingTo(BigDecimal("0.1000"))
+		assertThat(found.newShopBoostPercentage).isEqualByComparingTo(BigDecimal("0.1500"))
+
+		assertThat(boardDao.findDistrictValueProgression(districtId, 3)).isNull()
 	}
 
 	@Test

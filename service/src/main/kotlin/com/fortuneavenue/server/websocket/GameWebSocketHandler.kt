@@ -29,11 +29,19 @@ private data class Connection(val gameId: Uuid, val playerId: Uuid)
  * spaces. If that movement reaches a space with more than one path out of
  * it, it pauses there and a `choice_required` event lists the options --
  * respond with `{"type":"choose_path","spaceId":"<id>"}` to pick one and
- * keep moving. Any computer players whose turns immediately follow (once
- * the current player's turn actually ends) are played out automatically
- * too, each broadcast in turn order right after the requested one. The
- * moment that chain lands on a human player, a `turn_started` event names
- * them -- computer turns don't get one, since their own dice_rolled/
+ * keep moving. If movement instead runs out on an unowned shop, it pauses
+ * there too with a `shop_purchase_available` event naming the price --
+ * respond with `{"type":"buy_shop"}` or `{"type":"decline_shop"}` to decide --
+ * `buy_shop` comes back as an `error` instead if the player can't afford the
+ * price, leaving the decision still pending. Buying broadcasts
+ * `shop_purchased`, followed by `district_values_recalculated` if it brought
+ * the buyer's owned count in that shop's district to 2 or more. Any computer
+ * players whose turns immediately follow (once the
+ * current player's turn actually ends) are played out automatically too,
+ * each broadcast in turn order right after the requested one -- including
+ * their own shop purchase decisions, made immediately rather than paused
+ * on. The moment that chain lands on a human player, a `turn_started` event
+ * names them -- computer turns don't get one, since their own dice_rolled/
  * player_moved events already make it obvious whose turn it was.
  * See GameSimulationService for the actual rules.
  *
@@ -87,6 +95,8 @@ class GameWebSocketHandler(
 			ClientMessageType.READY -> handleReady(session, connection)
 			ClientMessageType.ROLL_DICE -> handleRollDice(session, connection)
 			ClientMessageType.CHOOSE_PATH -> handleChoosePath(session, connection, clientMessage?.spaceId)
+			ClientMessageType.BUY_SHOP -> handleBuyShop(session, connection)
+			ClientMessageType.DECLINE_SHOP -> handleDeclineShop(session, connection)
 			else -> send(session, ErrorEvent("Unrecognized message: ${message.payload}"))
 		}
 	}
@@ -131,6 +141,20 @@ class GameWebSocketHandler(
 		)
 	}
 
+	private fun handleBuyShop(session: WebSocketSession, connection: Connection) {
+		gameSimulationService.buyShop(connection.gameId, connection.playerId).fold(
+			onSuccess = { events -> events.forEach { event -> broadcastTurnEvent(connection.gameId, event) } },
+			onFailure = { error -> send(session, ErrorEvent(error.message ?: "Unable to buy the shop.")) },
+		)
+	}
+
+	private fun handleDeclineShop(session: WebSocketSession, connection: Connection) {
+		gameSimulationService.declineShopPurchase(connection.gameId, connection.playerId).fold(
+			onSuccess = { events -> events.forEach { event -> broadcastTurnEvent(connection.gameId, event) } },
+			onFailure = { error -> send(session, ErrorEvent(error.message ?: "Unable to decline the shop purchase.")) },
+		)
+	}
+
 	private fun broadcastTurnEvent(gameId: Uuid, event: GameSimulationService.TurnEvent) {
 		broadcast(gameId, event.toWireEvent())
 		if (event is GameSimulationService.TurnEvent.TurnEnded && event.gameOver) {
@@ -151,6 +175,21 @@ class GameWebSocketHandler(
 			playerId = playerId.toString(),
 			spaceId = spaceId.toString(),
 			options = options.map { PathOptionPayload(it.toSpaceId.toString(), it.branchOrder) },
+		)
+		is GameSimulationService.TurnEvent.ShopPurchaseAvailable -> ShopPurchaseAvailableEvent(
+			playerId = playerId.toString(),
+			spaceId = spaceId.toString(),
+			price = price,
+		)
+		is GameSimulationService.TurnEvent.ShopPurchased -> ShopPurchasedEvent(
+			playerId = playerId.toString(),
+			spaceId = spaceId.toString(),
+			price = price,
+		)
+		is GameSimulationService.TurnEvent.DistrictValuesRecalculated -> DistrictValuesRecalculatedEvent(
+			playerId = playerId.toString(),
+			districtId = districtId.toString(),
+			newValuesBySpaceId = newValuesBySpaceId.mapKeys { it.key.toString() },
 		)
 		is GameSimulationService.TurnEvent.TurnEnded -> TurnEndedEvent(turnNumber = turnNumber, playerId = playerId.toString())
 		is GameSimulationService.TurnEvent.TurnStarted -> TurnStartedEvent(playerId = playerId.toString(), turnNumber = turnNumber)

@@ -43,8 +43,15 @@ curl -s -X POST http://localhost:8080/boards \
       { "from": 2, "to": 0, "branchOrder": 0 }
     ],
     "startSpaceIndex": 0,
+    "startingGold": 1500,
     "districts": [
-      { "name": "Blue District", "colorHex": "1E90FF" }
+      {
+        "name": "Blue District",
+        "colorHex": "1E90FF",
+        "progressions": [
+          { "ownedShopCount": 2, "existingShopBoostPercentage": 0.1000, "newShopBoostPercentage": 0.1500 }
+        ]
+      }
     ]
   }'
 
@@ -65,6 +72,10 @@ curl -s -X POST http://localhost:8080/games/GAME_ID/players \
 ```
 
 `userId` on the player call is optional — omit it (or pass `{}`) for an anonymous player. Repeat the user/player steps to add more players; a game needs at least one player, but `markReady` only starts the game once every player in it has readied up.
+
+A district's `progressions` describe how shop values there scale as a single player accumulates more of them: `existingShopBoostPercentage` is applied to shops the player already owns in the district, and `newShopBoostPercentage` (typically larger, to make up for missing out on earlier boosts) is applied to the one they just bought. Any district with 2 or more spaces needs exactly one entry per `ownedShopCount` from 2 up to its total space count; a district with fewer spaces needs none.
+
+A board's `startingGold` is how much gold every player in a game on that board starts with -- it's copied onto each player's state the moment they're added to a game (see `POST /games/{gameId}/players` below).
 
 ### 2. Play the game over WebSocket
 
@@ -115,7 +126,29 @@ Reply from that same player's socket with the space to move onto, and movement p
 {"type":"choose_path","spaceId":"..."}
 ```
 
-Once movement is exhausted, all sockets see the turn end, and — once the game hits its max turn count — an additional game-over event:
+If movement instead runs out on a SHOP space nobody owns yet, it pauses there too and offers the purchase:
+
+```json
+{"type":"shop_purchase_available","playerId":"...","spaceId":"...","price":300}
+```
+
+Reply from that same player's socket to buy it or pass:
+
+```json
+{"type":"buy_shop"}
+{"type":"decline_shop"}
+```
+
+Buying broadcasts the purchase, then a district recalculation if it brought the buyer's owned count in that district to 2 or more (existing shops get boosted by `existingShopBoostPercentage`, the one just bought by the larger `newShopBoostPercentage`):
+
+```json
+{"type":"shop_purchased","playerId":"...","spaceId":"...","price":300}
+{"type":"district_values_recalculated","playerId":"...","districtId":"...","newValuesBySpaceId":{"...":330,"...":220}}
+```
+
+Either way, the turn ends right after.
+
+Once movement is exhausted (or a shop decision is made), all sockets see the turn end, and — once the game hits its max turn count — an additional game-over event:
 
 ```json
 {"type":"turn_ended","turnNumber":0,"playerId":"..."}

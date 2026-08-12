@@ -9,4 +9,5 @@ data class BoardGraph(
 	val paths: List<BoardPath>,
 	val shopInformation: List<ShopInformation> = emptyList(),
 	val districts: List<District> = emptyList(),
+	val districtProgressions: List<DistrictValueProgression> = emptyList(),
 )

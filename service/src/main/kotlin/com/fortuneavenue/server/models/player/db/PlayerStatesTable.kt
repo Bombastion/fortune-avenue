@@ -14,6 +14,12 @@ object PlayerStatesTable : UuidTable("player_states") {
 	val currentSpaceId = optReference("current_space_id", BoardSpacesTable)
 
 	val status = enumerationByName("status", STATUS_LENGTH, PlayerStatus::class).default(PlayerStatus.WAITING)
+
+	// Seeded from the game's board.startingGold when the player is created (see PlayerDao); free
+	// to rise and fall from there over the course of play. Can go negative -- that means the
+	// player has spent more than they have on hand and owes an auction of their properties to get
+	// back in the positive (auction mechanics aren't implemented yet).
+	val currentGold = integer("current_gold")
 }
 
 private const val STATUS_LENGTH = 50

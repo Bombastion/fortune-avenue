@@ -48,6 +48,7 @@ class PlayerControllerTest : DatabaseTest() {
 				CreateBoardPathRequest(2, 0),
 			),
 			startSpaceIndex = 0,
+			startingGold = 1000,
 		),
 	).body!!
 

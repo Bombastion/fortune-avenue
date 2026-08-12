@@ -6,6 +6,7 @@ import com.fortuneavenue.server.models.board.rest.BoardResponse
 import com.fortuneavenue.server.models.board.rest.CreateBoardPathRequest
 import com.fortuneavenue.server.models.board.rest.CreateBoardRequest
 import com.fortuneavenue.server.models.board.rest.CreateBoardSpaceRequest
+import com.fortuneavenue.server.models.board.rest.CreateDistrictProgressionRequest
 import com.fortuneavenue.server.models.board.rest.CreateDistrictRequest
 import com.fortuneavenue.server.models.common.rest.ErrorResponse
 import com.fortuneavenue.server.models.common.rest.Page
@@ -44,6 +45,7 @@ class BoardControllerTest : DatabaseTest() {
 			CreateBoardPathRequest(2, 0),
 		),
 		startSpaceIndex = 0,
+		startingGold = 1000,
 	)
 
 	@Test
@@ -59,6 +61,17 @@ class BoardControllerTest : DatabaseTest() {
 		assertThat(body.spaces).hasSize(3)
 		assertThat(body.paths).hasSize(3)
 		assertThat(body.spaces.map { it.id }).contains(body.startSpaceId)
+		assertThat(body.startingGold).isEqualTo(1000)
+	}
+
+	@Test
+	fun `creating a board with a zero or negative startingGold returns 400`() {
+		val request = validRequest("bad-gold-${Uuid.random()}").copy(startingGold = 0)
+
+		val response = restTemplate.postForEntity<ErrorResponse>("/boards", request)
+
+		assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
+		assertThat(response.body?.message).isNotBlank()
 	}
 
 	@Test
@@ -142,6 +155,51 @@ class BoardControllerTest : DatabaseTest() {
 	fun `creating a board with a district that has an invalid colorHex returns 400`() {
 		val request = validRequest("district-invalid-${Uuid.random()}").copy(
 			districts = listOf(CreateDistrictRequest("Red", "not-a-color")),
+		)
+
+		val response = restTemplate.postForEntity<ErrorResponse>("/boards", request)
+
+		assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
+		assertThat(response.body?.message).isNotBlank()
+	}
+
+	@Test
+	fun `creating a board with district progressions returns them as JSON`() {
+		val request = validRequest("district-progression-${Uuid.random()}").copy(
+			districts = listOf(
+				CreateDistrictRequest(
+					name = "Red",
+					colorHex = "FF0000",
+					progressions = listOf(CreateDistrictProgressionRequest(2, BigDecimal("0.1000"), BigDecimal("0.1500"))),
+				),
+			),
+			spaces = listOf(
+				CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0),
+				CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0),
+				CreateBoardSpaceRequest(SpaceType.BASIC),
+			),
+		)
+
+		val response = restTemplate.postForEntity<BoardResponse>("/boards", request)
+
+		assertThat(response.statusCode).isEqualTo(HttpStatus.CREATED)
+		val district = response.body!!.districts.single()
+		assertThat(district.progressions).hasSize(1)
+		val progression = district.progressions.single()
+		assertThat(progression.ownedShopCount).isEqualTo(2)
+		assertThat(progression.existingShopBoostPercentage).isEqualByComparingTo(BigDecimal("0.1000"))
+		assertThat(progression.newShopBoostPercentage).isEqualByComparingTo(BigDecimal("0.1500"))
+	}
+
+	@Test
+	fun `creating a board with a district missing required progression levels returns 400`() {
+		val request = validRequest("district-progression-missing-${Uuid.random()}").copy(
+			districts = listOf(CreateDistrictRequest("Red", "FF0000")),
+			spaces = listOf(
+				CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0),
+				CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0),
+				CreateBoardSpaceRequest(SpaceType.BASIC),
+			),
 		)
 
 		val response = restTemplate.postForEntity<ErrorResponse>("/boards", request)
