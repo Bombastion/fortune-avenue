@@ -31,6 +31,7 @@ import org.mockito.Mockito.lenient
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.never
 import org.mockito.Mockito.verify
+import org.mockito.Mockito.verifyNoInteractions
 import org.mockito.junit.jupiter.MockitoExtension
 import java.math.BigDecimal
 import kotlin.uuid.Uuid
@@ -1059,6 +1060,8 @@ class GameSimulationServiceTest {
 		given(gameShopInformationDao.findOwnedByPlayerInDistrict(gameId, playerId, newShop.districtId!!))
 			.willReturn(listOf(newShop, existingShop))
 		given(boardDao.findDistrictValueProgression(newShop.districtId!!, 2)).willReturn(progression)
+		given(gameShopInformationDao.findByGameAndDistrict(gameId, newShop.districtId!!))
+			.willReturn(listOf(newShop, existingShop))
 		given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
 
 		val result = service.buyShop(gameId, playerId)
@@ -1073,6 +1076,9 @@ class GameSimulationServiceTest {
 		assertThat(recalculated.newValuesBySpaceId[otherSpaceId]).isEqualTo(220)
 		verify(gameShopInformationDao).setCurrentValue(newShop.id.value, 120)
 		verify(gameShopInformationDao).setCurrentValue(existingShop.id.value, 220)
+		// The district's stock is re-averaged from every shop in it (re-read after the boosts
+		// above), not just the two that were just boosted.
+		verify(gameDistrictInformationDao).recalculateCurrentStockValue(gameId, newShop.districtId!!, listOf(newShop, existingShop))
 	}
 
 	@Test
@@ -1099,6 +1105,8 @@ class GameSimulationServiceTest {
 			GameSimulationService.TurnEvent.TurnEnded(playerId, 0, gameOver = false),
 			GameSimulationService.TurnEvent.TurnStarted(playerId, 1),
 		)
+		// Nothing boosted, so nothing for the district's stock value to be re-averaged from.
+		verifyNoInteractions(gameDistrictInformationDao)
 	}
 
 	@Test

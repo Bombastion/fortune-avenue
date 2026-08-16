@@ -11,6 +11,7 @@ import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.springframework.stereotype.Repository
+import java.math.BigDecimal
 import java.math.RoundingMode
 import kotlin.uuid.Uuid
 
@@ -39,19 +40,36 @@ class GameDistrictInformationDao {
 			val shops = shopsByDistrictId[district.id.value]
 			if (shops.isNullOrEmpty()) return@mapNotNull null
 
-			val average = shops.sumOf { it.currentValue }
-				.toBigDecimal()
-				.divide(shops.size.toBigDecimal(), AVERAGE_INTERMEDIATE_SCALE, RoundingMode.HALF_UP)
-			val currentStockValue = (average * district.minimumStockPercentage).setScale(0, RoundingMode.HALF_UP).toInt()
-
 			GameDistrictInformation.new {
 				this.gameId = EntityID(gameId, GamesTable)
 				districtId = district.id
 				boardId = district.boardId
 				minimumStockPercentage = district.minimumStockPercentage
-				this.currentStockValue = currentStockValue
+				currentStockValue = computeCurrentStockValue(shops, district.minimumStockPercentage)
 			}
 		}
+	}
+
+	/**
+	 * Recomputes and persists [districtId]'s current_stock_value in [gameId] from [shops] --
+	 * every shop in the district (see [com.fortuneavenue.server.dao.GameShopInformationDao.findByGameAndDistrict]),
+	 * not just the ones whose value just changed: a purchase's district value progression only
+	 * boosts the shops the buyer owns there, but current_stock_value averages every shop in the
+	 * district regardless of owner. A no-op (returns null) if [districtId] has no seeded row --
+	 * shouldn't happen in practice, since a recalculation is only ever triggered by a purchase in
+	 * a district that already has at least one shop (the one just bought), and seedForGame always
+	 * seeds a row for any district with a SHOP space. Called after a district value progression
+	 * updates its shops' currentValue (see GameSimulationService.purchaseShop).
+	 */
+	fun recalculateCurrentStockValue(gameId: Uuid, districtId: EntityID<Uuid>, shops: List<GameShopInformation>): GameDistrictInformation? = transaction {
+		if (shops.isEmpty()) return@transaction null
+
+		val info = GameDistrictInformation.find {
+			(GameDistrictInformationTable.gameId eq EntityID(gameId, GamesTable)) and
+				(GameDistrictInformationTable.districtId eq districtId)
+		}.firstOrNull() ?: return@transaction null
+
+		info.apply { currentStockValue = computeCurrentStockValue(shops, minimumStockPercentage) }
 	}
 
 	fun findByGameAndDistrict(gameId: Uuid, districtId: Uuid): GameDistrictInformation? = transaction {
@@ -59,5 +77,13 @@ class GameDistrictInformationDao {
 			(GameDistrictInformationTable.gameId eq EntityID(gameId, GamesTable)) and
 				(GameDistrictInformationTable.districtId eq EntityID(districtId, DistrictsTable))
 		}.firstOrNull()
+	}
+
+	/** The average currentValue of [shops], multiplied by [minimumStockPercentage] and rounded to the nearest whole gold. */
+	private fun computeCurrentStockValue(shops: List<GameShopInformation>, minimumStockPercentage: BigDecimal): Int {
+		val average = shops.sumOf { it.currentValue }
+			.toBigDecimal()
+			.divide(shops.size.toBigDecimal(), AVERAGE_INTERMEDIATE_SCALE, RoundingMode.HALF_UP)
+		return (average * minimumStockPercentage).setScale(0, RoundingMode.HALF_UP).toInt()
 	}
 }

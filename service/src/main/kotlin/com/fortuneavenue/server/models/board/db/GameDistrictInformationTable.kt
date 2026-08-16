@@ -7,14 +7,7 @@ private const val STOCK_PERCENTAGE_PRECISION = 4
 private const val STOCK_PERCENTAGE_SCALE = 4
 
 /**
- * Per-game copy of a district's stock information. Board templates are reusable across games, so
- * minimum_stock_percentage is denormalized here from districts -- same reasoning as
- * GameShopInformationTable copying shop_information's fields. One row per (game, district),
- * seeded from the district's minimumStockPercentage and its SHOP spaces' just-seeded
- * current_value when a game starts (see GameDistrictInformationDao.seedForGame) -- only for
- * districts that actually contain at least one SHOP space.
- *
- * See the migration for the constraints enforced at the DB level.
+ * Per-game copy of a district's stock information
  */
 object GameDistrictInformationTable : UuidTable("game_district_information") {
 	val gameId = reference("game_id", GamesTable)

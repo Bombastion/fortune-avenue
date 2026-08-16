@@ -449,7 +449,9 @@ class GameSimulationService(
 	 * shop they own there per that district's progression (see DistrictValueProgressionsTable):
 	 * every shop they already owned gets existingShopBoostPercentage, and the one just bought
 	 * gets newShopBoostPercentage instead. Shops outside a district, or a purchase that's still
-	 * the player's only shop in one, have nothing to recalculate.
+	 * the player's only shop in one, have nothing to recalculate -- and since current_stock_value
+	 * is derived purely from shops' currentValue (see GameDistrictInformationDao), a district's
+	 * stock only ever needs recomputing in lockstep with that same recalculation.
 	 */
 	private fun purchaseShop(gameId: Uuid, playerId: Uuid, shop: GameShopInformation): List<TurnEvent> {
 		val price = shop.currentValue
@@ -479,6 +481,12 @@ class GameSimulationService(
 					owned.spaceId.value to newValue
 				}
 				events += TurnEvent.DistrictValuesRecalculated(playerId, districtId.value, newValuesBySpaceId)
+
+				// current_stock_value averages every shop in the district, not just the ones
+				// [ownedInDistrict] just boosted -- shops other players (or nobody) own there
+				// still count, so this re-reads the whole district rather than reusing that list.
+				val allShopsInDistrict = gameShopInformationDao.findByGameAndDistrict(gameId, districtId)
+				gameDistrictInformationDao.recalculateCurrentStockValue(gameId, districtId, allShopsInDistrict)
 			}
 		}
 

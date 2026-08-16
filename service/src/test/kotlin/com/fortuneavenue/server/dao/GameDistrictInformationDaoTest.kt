@@ -115,4 +115,54 @@ class GameDistrictInformationDaoTest : DatabaseTest() {
 		assertThat(gameDistrictInformationDao.findByGameAndDistrict(gameId, redDistrictId)?.currentStockValue).isEqualTo(75)
 		assertThat(gameDistrictInformationDao.findByGameAndDistrict(gameId, blueDistrictId)).isNull()
 	}
+
+	@Test
+	fun `recalculateCurrentStockValue re-averages from the given shops and persists the result`() {
+		val boardGraph = createBoardWithShops()
+		val gameId = createGameId(boardGraph.board.id.value)
+		val seededShops = gameShopInformationDao.seedForGame(gameId, boardGraph)
+		gameDistrictInformationDao.seedForGame(gameId, boardGraph, seededShops)
+		val redDistrict = boardGraph.districts.single { it.name == "Red" }
+
+		// Simulate a district value progression having boosted one of the two shops (as
+		// GameSimulationService.purchaseShop would) before re-reading the district's shops.
+		val inDistrictShops = seededShops.filter { it.districtId == redDistrict.id }
+		gameShopInformationDao.setCurrentValue(inDistrictShops[0].id.value, 150)
+		val refreshedShops = gameShopInformationDao.findByGameAndDistrict(gameId, redDistrict.id)
+
+		val updated = gameDistrictInformationDao.recalculateCurrentStockValue(gameId, redDistrict.id, refreshedShops)
+
+		// average(150, 200) = 175; 175 * 0.5 = 87.5, which rounds up to 88 under HALF_UP.
+		assertThat(updated?.currentStockValue).isEqualTo(88)
+		assertThat(gameDistrictInformationDao.findByGameAndDistrict(gameId, redDistrict.id.value)?.currentStockValue).isEqualTo(88)
+	}
+
+	@Test
+	fun `recalculateCurrentStockValue returns null for a district with no seeded row`() {
+		val boardGraph = createBoardWithShops()
+		val gameId = createGameId(boardGraph.board.id.value)
+		val seededShops = gameShopInformationDao.seedForGame(gameId, boardGraph)
+		gameDistrictInformationDao.seedForGame(gameId, boardGraph, seededShops)
+		val blueDistrict = boardGraph.districts.single { it.name == "Blue" }
+
+		// "Blue" has no shops and so no seeded row -- pass a non-empty (if unrelated) shops list
+		// to isolate the missing-row branch from the empty-shops guard.
+		val result = gameDistrictInformationDao.recalculateCurrentStockValue(gameId, blueDistrict.id, seededShops)
+
+		assertThat(result).isNull()
+	}
+
+	@Test
+	fun `recalculateCurrentStockValue returns null when given no shops`() {
+		val boardGraph = createBoardWithShops()
+		val gameId = createGameId(boardGraph.board.id.value)
+		val seededShops = gameShopInformationDao.seedForGame(gameId, boardGraph)
+		gameDistrictInformationDao.seedForGame(gameId, boardGraph, seededShops)
+		val redDistrict = boardGraph.districts.single { it.name == "Red" }
+
+		val result = gameDistrictInformationDao.recalculateCurrentStockValue(gameId, redDistrict.id, emptyList())
+
+		assertThat(result).isNull()
+		assertThat(gameDistrictInformationDao.findByGameAndDistrict(gameId, redDistrict.id.value)?.currentStockValue).isEqualTo(75)
+	}
 }

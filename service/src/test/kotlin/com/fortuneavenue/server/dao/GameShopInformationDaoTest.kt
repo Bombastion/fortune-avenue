@@ -121,4 +121,21 @@ class GameShopInformationDaoTest : DatabaseTest() {
 		assertThat(owned).hasSize(1)
 		assertThat(owned.single().id.value).isEqualTo(inDistrictShops[0].id.value)
 	}
+
+	@Test
+	fun `findByGameAndDistrict returns every shop in that district regardless of owner`() {
+		val boardGraph = createBoardWithShops()
+		val gameId = createGameId(boardGraph.board.id.value)
+		val seeded = gameShopInformationDao.seedForGame(gameId, boardGraph)
+		val player = playerDao.create(gameId)
+		val districtId = boardGraph.districts.single().id
+
+		val inDistrictShops = seeded.filter { it.districtId == districtId }
+		// One shop owned, one left unowned -- both should still come back.
+		gameShopInformationDao.setOwner(inDistrictShops[0].id.value, player.id.value)
+
+		val found = gameShopInformationDao.findByGameAndDistrict(gameId, districtId)
+
+		assertThat(found.map { it.id.value }).containsExactlyInAnyOrderElementsOf(inDistrictShops.map { it.id.value })
+	}
 }
