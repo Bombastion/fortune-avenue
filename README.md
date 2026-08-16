@@ -35,12 +35,20 @@ curl -s -X POST http://localhost:8080/boards \
     "spaces": [
       { "spaceType": "BASIC", "districtIndex": 0 },
       { "spaceType": "SHOP", "baseValue": 300, "basePricePercentage": 0.2500 },
-      { "spaceType": "BASIC", "districtIndex": 0 }
+      { "spaceType": "BASIC", "districtIndex": 0 },
+      { "spaceType": "HEART" },
+      { "spaceType": "DIAMOND" },
+      { "spaceType": "SPADE" },
+      { "spaceType": "CLUB" }
     ],
     "paths": [
       { "from": 0, "to": 1, "branchOrder": 0 },
       { "from": 1, "to": 2, "branchOrder": 0 },
-      { "from": 2, "to": 0, "branchOrder": 0 }
+      { "from": 2, "to": 3, "branchOrder": 0 },
+      { "from": 3, "to": 4, "branchOrder": 0 },
+      { "from": 4, "to": 5, "branchOrder": 0 },
+      { "from": 5, "to": 6, "branchOrder": 0 },
+      { "from": 6, "to": 0, "branchOrder": 0 }
     ],
     "startSpaceIndex": 0,
     "startingGold": 1500,
