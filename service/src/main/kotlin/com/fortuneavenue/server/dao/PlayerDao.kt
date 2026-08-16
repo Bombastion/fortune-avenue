@@ -1,6 +1,7 @@
 package com.fortuneavenue.server.dao
 
 import com.fortuneavenue.server.models.board.db.BoardSpacesTable
+import com.fortuneavenue.server.models.board.db.SpaceType
 import com.fortuneavenue.server.models.game.db.GamesTable
 import com.fortuneavenue.server.models.player.db.Player
 import com.fortuneavenue.server.models.player.db.PlayerState
@@ -60,6 +61,23 @@ class PlayerDao {
 	/** Adds [delta] (negative to spend) to a player's currentGold. Can go negative -- see PlayerStatesTable. */
 	fun adjustGold(playerId: Uuid, delta: Int): PlayerState? = transaction {
 		findStateEntity(playerId)?.apply { currentGold += delta }
+	}
+
+	/**
+	 * Adds [suit] to [playerId]'s held suits if they don't already have it -- a suit already
+	 * held has no effect (see GameSimulationService, which drives this whenever a player passes
+	 * or lands on a suit space). Returns whether this was actually a new pickup, so a caller can
+	 * tell whether to announce it, or null if the player has no state at all.
+	 */
+	fun addHeldSuit(playerId: Uuid, suit: SpaceType): Boolean? = transaction {
+		val state = findStateEntity(playerId) ?: return@transaction null
+
+		if (suit.name in state.heldSuits) {
+			false
+		} else {
+			state.heldSuits = state.heldSuits + suit.name
+			true
+		}
 	}
 
 	// Not itself wrapped in a transaction -- only ever called from within one

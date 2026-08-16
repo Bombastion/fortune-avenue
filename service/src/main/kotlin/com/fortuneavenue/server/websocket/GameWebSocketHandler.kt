@@ -26,11 +26,15 @@ private data class Connection(val gameId: Uuid, val playerId: Uuid)
  * that puts one or more computer players first, their turns get played out
  * and broadcast immediately, right after the game_started event) and
  * `{"type":"roll_dice"}` on its turn to roll and move forward that many
- * spaces. If that movement reaches a space with more than one path out of
- * it, it pauses there and a `choice_required` event lists the options --
- * respond with `{"type":"choose_path","spaceId":"<id>"}` to pick one and
- * keep moving. If movement instead runs out on an unowned shop, it pauses
- * there too with a `shop_purchase_available` event naming the price --
+ * spaces. Every space a player passes or lands on along the way is checked
+ * for a `suit_picked_up` event -- landing on or passing a HEART/DIAMOND/
+ * SPADE/CLUB space picks that suit up the first time, broadcast right after
+ * the `player_moved` event for that space (nothing is broadcast for a suit
+ * already held). If that movement reaches a space with more than one path
+ * out of it, it pauses there and a `choice_required` event lists the
+ * options -- respond with `{"type":"choose_path","spaceId":"<id>"}` to pick
+ * one and keep moving. If movement instead runs out on an unowned shop, it
+ * pauses there too with a `shop_purchase_available` event naming the price --
  * respond with `{"type":"buy_shop"}` or `{"type":"decline_shop"}` to decide --
  * `buy_shop` comes back as an `error` instead if the player can't afford the
  * price, leaving the decision still pending. Buying broadcasts
@@ -170,6 +174,11 @@ class GameWebSocketHandler(
 			fromSpaceId = fromSpaceId.toString(),
 			toSpaceId = toSpaceId.toString(),
 			movementPointsRemaining = movementPointsRemaining,
+		)
+		is GameSimulationService.TurnEvent.SuitPickedUp -> SuitPickedUpEvent(
+			playerId = playerId.toString(),
+			spaceId = spaceId.toString(),
+			suit = suit.name,
 		)
 		is GameSimulationService.TurnEvent.ChoiceRequired -> ChoiceRequiredEvent(
 			playerId = playerId.toString(),

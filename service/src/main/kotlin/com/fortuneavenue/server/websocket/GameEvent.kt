@@ -35,6 +35,14 @@ data class PlayerMovedEvent(
 	override val type: String = "player_moved",
 ) : GameEvent
 
+/** [playerId] picked up [suit] (one of HEART/DIAMOND/SPADE/CLUB) by passing or landing on [spaceId]. */
+data class SuitPickedUpEvent(
+	val playerId: String,
+	val spaceId: String,
+	val suit: String,
+	override val type: String = "suit_picked_up",
+) : GameEvent
+
 /** One outgoing path a player can pick with a `choose_path` message. */
 data class PathOptionPayload(val toSpaceId: String, val branchOrder: Int)
 
