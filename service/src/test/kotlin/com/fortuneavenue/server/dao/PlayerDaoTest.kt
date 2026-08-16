@@ -136,6 +136,45 @@ class PlayerDaoTest : DatabaseTest() {
 	}
 
 	@Test
+	fun `create also persists state with an empty heldSuits`() {
+		val game = createGame()
+
+		val created = playerDao.create(gameId = game.id.value)
+
+		assertThat(playerDao.findState(created.id.value)!!.heldSuits).isEmpty()
+	}
+
+	@Test
+	fun `addHeldSuit adds a new suit`() {
+		val player = playerDao.create(gameId = createGame().id.value)
+
+		val addedFirst = playerDao.addHeldSuit(player.id.value, SpaceType.HEART)
+		val addedSecond = playerDao.addHeldSuit(player.id.value, SpaceType.SPADE)
+
+		assertThat(addedFirst).isTrue()
+		assertThat(addedSecond).isTrue()
+		assertThat(playerDao.findState(player.id.value)!!.heldSuits).containsExactlyInAnyOrder("HEART", "SPADE")
+	}
+
+	@Test
+	fun `addHeldSuit picking up a suit already held returns false and does not duplicate it`() {
+		val player = playerDao.create(gameId = createGame().id.value)
+		playerDao.addHeldSuit(player.id.value, SpaceType.DIAMOND)
+
+		val addedAgain = playerDao.addHeldSuit(player.id.value, SpaceType.DIAMOND)
+
+		assertThat(addedAgain).isFalse()
+		assertThat(playerDao.findState(player.id.value)!!.heldSuits).containsExactly("DIAMOND")
+	}
+
+	@Test
+	fun `addHeldSuit returns null for a player id that does not exist`() {
+		val result = playerDao.addHeldSuit(Uuid.random(), SpaceType.CLUB)
+
+		assertThat(result).isNull()
+	}
+
+	@Test
 	fun `create persists a player with no user, for a future computer opponent`() {
 		val game = createGame()
 

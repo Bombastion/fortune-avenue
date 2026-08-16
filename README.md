@@ -117,6 +117,14 @@ All sockets receive the roll, followed by one `player_moved` broadcast per space
 {"type":"player_moved","turnNumber":0,"playerId":"...","fromSpaceId":"...","toSpaceId":"...","movementPointsRemaining":2}
 ```
 
+Every space a player passes or lands on is also a candidate for a suit pickup -- a board can have HEART, DIAMOND, SPADE, and CLUB spaces (in addition to BASIC and SHOP), and moving onto one of those for the first time picks it up, broadcast right after that space's `player_moved` event:
+
+```json
+{"type":"suit_picked_up","playerId":"...","spaceId":"...","suit":"HEART"}
+```
+
+Nothing is broadcast for a suit a player already holds -- picking one up again has no effect.
+
 If movement reaches a space with more than one path out of it, it pauses there instead of a `player_moved` broadcast, and lists the options:
 
 ```json

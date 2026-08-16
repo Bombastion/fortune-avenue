@@ -1,6 +1,7 @@
 package com.fortuneavenue.server.models.player.db
 
 import com.fortuneavenue.server.models.board.db.BoardSpacesTable
+import org.jetbrains.exposed.v1.core.VarCharColumnType
 import org.jetbrains.exposed.v1.core.dao.id.UuidTable
 
 // Deliberately minimal beyond position for now -- money, owned properties,
@@ -20,6 +21,16 @@ object PlayerStatesTable : UuidTable("player_states") {
 	// player has spent more than they have on hand and owes an auction of their properties to get
 	// back in the positive (auction mechanics aren't implemented yet).
 	val currentGold = integer("current_gold")
+
+	// Card suits (SpaceType.HEART/DIAMOND/SPADE/CLUB, stored by name) this player has picked up
+	// by passing or landing on that type of space over the course of the game -- see
+	// GameSimulationService. Starts empty and only ever grows; picking up a suit already held
+	// has no effect (see PlayerDao.addHeldSuit).
+	val heldSuits = array<String>("held_suits", VarCharColumnType(SPACE_TYPE_LENGTH)).default(emptyList())
 }
 
 private const val STATUS_LENGTH = 50
+
+// Matches SpaceType's own VARCHAR length (see BoardSpacesTable) -- held_suits stores those same
+// enum names.
+private const val SPACE_TYPE_LENGTH = 50

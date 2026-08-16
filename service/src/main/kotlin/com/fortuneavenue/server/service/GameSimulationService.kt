@@ -8,6 +8,7 @@ import com.fortuneavenue.server.dao.PlayerDao
 import com.fortuneavenue.server.models.board.db.BoardGraph
 import com.fortuneavenue.server.models.board.db.BoardPath
 import com.fortuneavenue.server.models.board.db.GameShopInformation
+import com.fortuneavenue.server.models.board.db.SpaceType
 import com.fortuneavenue.server.models.game.db.Game
 import com.fortuneavenue.server.models.player.db.Player
 import com.fortuneavenue.server.models.player.db.PlayerStatus
@@ -43,6 +44,12 @@ import kotlin.uuid.Uuid
  * with a [TurnEvent.TurnStarted] the moment that next player is a human,
  * since nothing else is going to happen until they roll themselves.
  * The game ends once turnNumber reaches maxTurns.
+ *
+ * Every space a player is moved onto along the way -- whether just passed through mid-move or
+ * where they end up -- is also checked for a suit (HEART/DIAMOND/SPADE/CLUB, see SpaceType):
+ * landing on or passing one picks it up for that player (see PlayerDao.addHeldSuit), announced
+ * with a [TurnEvent.SuitPickedUp] the first time, and silently ignored -- no event, no
+ * duplicate -- every time after.
  *
  * A player with no [com.fortuneavenue.server.models.player.db.Player.userId]
  * is a computer opponent -- there's nobody connected who could ready it up
@@ -98,6 +105,17 @@ class GameSimulationService(
 			val fromSpaceId: Uuid,
 			val toSpaceId: Uuid,
 			val movementPointsRemaining: Int,
+		) : TurnEvent
+
+		/**
+		 * [playerId] passed or landed on [spaceId], a suit space (HEART/DIAMOND/SPADE/CLUB), and
+		 * picked up [suit] for the first time this game. Passing or landing on a suit already
+		 * held has no effect and emits nothing instead -- see PlayerDao.addHeldSuit.
+		 */
+		data class SuitPickedUp(
+			override val playerId: Uuid,
+			val spaceId: Uuid,
+			val suit: SpaceType,
 		) : TurnEvent
 
 		/** Movement is paused on [spaceId] until [choosePath] is called with one of [options]. */
@@ -268,9 +286,7 @@ class GameSimulationService(
 			?: return Result.failure(InvalidTurnException("$toSpaceId isn't a path out of player $playerId's current space."))
 
 		val movementPointsRemaining = remaining - 1
-		val events = mutableListOf<TurnEvent>(
-			applyMove(playerId, game.turnNumber, currentSpaceId, chosenPath, movementPointsRemaining),
-		)
+		val events = applyMove(playerId, game.turnNumber, currentSpaceId, chosenPath, movementPointsRemaining, boardGraph).toMutableList()
 		val movement = advanceMovement(
 			gameId,
 			playerId,
@@ -412,7 +428,7 @@ class GameSimulationService(
 
 			val chosenPath = if (outgoing.size > 1) computerPlayer.chooseBranch(outgoing) else outgoing.single()
 			remaining -= 1
-			events += applyMove(playerId, game.turnNumber, currentSpaceId, chosenPath, remaining)
+			events += applyMove(playerId, game.turnNumber, currentSpaceId, chosenPath, remaining, boardGraph)
 			currentSpaceId = chosenPath.toSpaceId.value
 		}
 
@@ -502,15 +518,38 @@ class GameSimulationService(
 	/** Whether [playerId] currently has at least [price] gold on hand -- a missing state counts as no. */
 	private fun canAfford(playerId: Uuid, price: Int): Boolean = (currentGold(playerId) ?: 0) >= price
 
+	/**
+	 * Moves [playerId] onto [path]'s destination and returns the resulting events -- always a
+	 * leading [TurnEvent.Moved], plus a [TurnEvent.SuitPickedUp] if that destination is a suit
+	 * space and picking it up was actually new (see [pickUpSuit]). Every space a player is moved
+	 * onto over the course of a turn -- passed through mid-move or landed on at the end --
+	 * flows through here exactly once, so a suit is picked up whether the space was merely
+	 * passed or is where movement actually stopped.
+	 */
 	private fun applyMove(
 		playerId: Uuid,
 		turnNumber: Int,
 		fromSpaceId: Uuid,
 		path: BoardPath,
 		movementPointsRemaining: Int,
-	): TurnEvent.Moved {
+		boardGraph: BoardGraph,
+	): List<TurnEvent> {
 		playerDao.updatePosition(playerId, path.toSpaceId.value)
-		return TurnEvent.Moved(playerId, turnNumber, fromSpaceId, path.toSpaceId.value, movementPointsRemaining)
+		val moved = TurnEvent.Moved(playerId, turnNumber, fromSpaceId, path.toSpaceId.value, movementPointsRemaining)
+		return listOf(moved) + pickUpSuit(playerId, path.toSpaceId.value, boardGraph)
+	}
+
+	/**
+	 * [spaceId] is picked up as a suit for [playerId] if it's a HEART/DIAMOND/SPADE/CLUB space
+	 * (see [SUIT_SPACE_TYPES]) -- a no-op, emitting nothing, for any other space type or one
+	 * [playerId] already holds (see [PlayerDao.addHeldSuit]).
+	 */
+	private fun pickUpSuit(playerId: Uuid, spaceId: Uuid, boardGraph: BoardGraph): List<TurnEvent> {
+		val suit = boardGraph.spaces.find { it.id.value == spaceId }?.spaceType?.takeIf { it in SUIT_SPACE_TYPES }
+			?: return emptyList()
+		val pickedUp = playerDao.addHeldSuit(playerId, suit) ?: return emptyList()
+
+		return if (pickedUp) listOf(TurnEvent.SuitPickedUp(playerId, spaceId, suit)) else emptyList()
 	}
 
 	/** Only chains into the next player(s) once [movement] actually ended the turn rather than pausing on a choice. */
@@ -583,5 +622,6 @@ class GameSimulationService(
 
 	companion object {
 		private const val MIN_SHOPS_OWNED_TO_RECALCULATE = 2
+		private val SUIT_SPACE_TYPES = setOf(SpaceType.HEART, SpaceType.DIAMOND, SpaceType.SPADE, SpaceType.CLUB)
 	}
 }

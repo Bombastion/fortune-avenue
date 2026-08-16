@@ -8,12 +8,14 @@ import com.fortuneavenue.server.dao.PlayerDao
 import com.fortuneavenue.server.models.board.db.Board
 import com.fortuneavenue.server.models.board.db.BoardGraph
 import com.fortuneavenue.server.models.board.db.BoardPath
+import com.fortuneavenue.server.models.board.db.BoardSpace
 import com.fortuneavenue.server.models.board.db.BoardSpacesTable
 import com.fortuneavenue.server.models.board.db.BoardsTable
 import com.fortuneavenue.server.models.board.db.DistrictValueProgression
 import com.fortuneavenue.server.models.board.db.DistrictsTable
 import com.fortuneavenue.server.models.board.db.GameShopInformation
 import com.fortuneavenue.server.models.board.db.GameShopInformationTable
+import com.fortuneavenue.server.models.board.db.SpaceType
 import com.fortuneavenue.server.models.game.db.Game
 import com.fortuneavenue.server.models.player.db.Player
 import com.fortuneavenue.server.models.player.db.PlayerState
@@ -93,6 +95,13 @@ class GameSimulationServiceTest {
 		lenient().`when`(path.toSpaceId).thenReturn(EntityID(to, BoardSpacesTable))
 		lenient().`when`(path.branchOrder).thenReturn(branchOrder)
 		return path
+	}
+
+	private fun mockSpace(id: Uuid, spaceType: SpaceType): BoardSpace {
+		val space = mock(BoardSpace::class.java)
+		lenient().`when`(space.id).thenReturn(EntityID(id, BoardSpacesTable))
+		lenient().`when`(space.spaceType).thenReturn(spaceType)
+		return space
 	}
 
 	private fun mockBoard(startSpaceId: Uuid? = null): Board {
@@ -697,6 +706,131 @@ class GameSimulationServiceTest {
 		assertThat(events).isNotNull()
 		val movedEvents = events!!.filterIsInstance<GameSimulationService.TurnEvent.Moved>()
 		assertThat(movedEvents.map { it.playerId }).containsExactly(humanId, computerAId, computerBId)
+	}
+
+	// --- suit pickups ---
+
+	@Test
+	fun `rollDice picks up a suit for the first time landing on a suit space`() {
+		val playerId = Uuid.random()
+		val startSpaceId = Uuid.random()
+		val nextSpaceId = Uuid.random()
+		val game = mockGame(turnOrder = listOf(playerId), turnNumber = 0, maxTurns = 10)
+		val player = mockPlayer(playerId)
+		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = null)
+		val board = mockBoard(startSpaceId = startSpaceId)
+		val path = mockPath(from = startSpaceId, to = nextSpaceId, branchOrder = 0)
+		val space = mockSpace(nextSpaceId, SpaceType.HEART)
+		val boardGraph = BoardGraph(board = board, spaces = listOf(space), paths = listOf(path))
+		val advancedGame = mockGame(turnOrder = listOf(playerId), turnNumber = 1, maxTurns = 10)
+		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
+		given(playerDao.findState(playerId)).willReturn(playerState)
+		given(boardDao.findById(boardId)).willReturn(boardGraph)
+		given(dice.roll()).willReturn(1)
+		given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
+		given(playerDao.addHeldSuit(playerId, SpaceType.HEART)).willReturn(true)
+
+		val result = service.rollDice(gameId, playerId)
+
+		val events = result.getOrNull()
+		assertThat(events).containsExactly(
+			GameSimulationService.TurnEvent.DiceRolled(playerId, 1),
+			GameSimulationService.TurnEvent.Moved(playerId, 0, startSpaceId, nextSpaceId, 0),
+			GameSimulationService.TurnEvent.SuitPickedUp(playerId, nextSpaceId, SpaceType.HEART),
+			GameSimulationService.TurnEvent.TurnEnded(playerId, 0, gameOver = false),
+			GameSimulationService.TurnEvent.TurnStarted(playerId, 1),
+		)
+		verify(playerDao).addHeldSuit(playerId, SpaceType.HEART)
+	}
+
+	@Test
+	fun `rollDice picks up a suit for a space merely passed through, not just the one movement ends on`() {
+		val playerId = Uuid.random()
+		val spaceA = Uuid.random()
+		val spaceB = Uuid.random()
+		val spaceC = Uuid.random()
+		val game = mockGame(turnOrder = listOf(playerId))
+		val player = mockPlayer(playerId)
+		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceA)
+		val board = mockBoard()
+		val passedSpace = mockSpace(spaceB, SpaceType.DIAMOND)
+		val boardGraph = BoardGraph(
+			board = board,
+			spaces = listOf(passedSpace),
+			paths = listOf(mockPath(spaceA, spaceB, 0), mockPath(spaceB, spaceC, 0)),
+		)
+		val advancedGame = mockGame(turnOrder = listOf(playerId), turnNumber = 1)
+		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
+		given(playerDao.findState(playerId)).willReturn(playerState)
+		given(boardDao.findById(boardId)).willReturn(boardGraph)
+		given(dice.roll()).willReturn(2)
+		given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
+		given(playerDao.addHeldSuit(playerId, SpaceType.DIAMOND)).willReturn(true)
+
+		val result = service.rollDice(gameId, playerId)
+
+		val events = result.getOrNull()
+		assertThat(events).contains(GameSimulationService.TurnEvent.SuitPickedUp(playerId, spaceB, SpaceType.DIAMOND))
+		verify(playerDao).addHeldSuit(playerId, SpaceType.DIAMOND)
+	}
+
+	@Test
+	fun `rollDice landing on a suit already held emits no SuitPickedUp event`() {
+		val playerId = Uuid.random()
+		val startSpaceId = Uuid.random()
+		val nextSpaceId = Uuid.random()
+		val game = mockGame(turnOrder = listOf(playerId), turnNumber = 0, maxTurns = 10)
+		val player = mockPlayer(playerId)
+		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = null)
+		val board = mockBoard(startSpaceId = startSpaceId)
+		val path = mockPath(from = startSpaceId, to = nextSpaceId, branchOrder = 0)
+		val space = mockSpace(nextSpaceId, SpaceType.CLUB)
+		val boardGraph = BoardGraph(board = board, spaces = listOf(space), paths = listOf(path))
+		val advancedGame = mockGame(turnOrder = listOf(playerId), turnNumber = 1, maxTurns = 10)
+		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
+		given(playerDao.findState(playerId)).willReturn(playerState)
+		given(boardDao.findById(boardId)).willReturn(boardGraph)
+		given(dice.roll()).willReturn(1)
+		given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
+		given(playerDao.addHeldSuit(playerId, SpaceType.CLUB)).willReturn(false)
+
+		val result = service.rollDice(gameId, playerId)
+
+		val events = result.getOrNull()
+		assertThat(events).containsExactly(
+			GameSimulationService.TurnEvent.DiceRolled(playerId, 1),
+			GameSimulationService.TurnEvent.Moved(playerId, 0, startSpaceId, nextSpaceId, 0),
+			GameSimulationService.TurnEvent.TurnEnded(playerId, 0, gameOver = false),
+			GameSimulationService.TurnEvent.TurnStarted(playerId, 1),
+		)
+	}
+
+	@Test
+	fun `rollDice landing on a non-suit space never calls addHeldSuit`() {
+		val playerId = Uuid.random()
+		val startSpaceId = Uuid.random()
+		val nextSpaceId = Uuid.random()
+		val game = mockGame(turnOrder = listOf(playerId), turnNumber = 0, maxTurns = 10)
+		val player = mockPlayer(playerId)
+		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = null)
+		val board = mockBoard(startSpaceId = startSpaceId)
+		val path = mockPath(from = startSpaceId, to = nextSpaceId, branchOrder = 0)
+		val space = mockSpace(nextSpaceId, SpaceType.BASIC)
+		val boardGraph = BoardGraph(board = board, spaces = listOf(space), paths = listOf(path))
+		val advancedGame = mockGame(turnOrder = listOf(playerId), turnNumber = 1, maxTurns = 10)
+		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
+		given(playerDao.findState(playerId)).willReturn(playerState)
+		given(boardDao.findById(boardId)).willReturn(boardGraph)
+		given(dice.roll()).willReturn(1)
+		given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
+
+		val result = service.rollDice(gameId, playerId)
+
+		assertThat(result.getOrNull()?.filterIsInstance<GameSimulationService.TurnEvent.SuitPickedUp>()).isEmpty()
 	}
 
 	// --- choosePath ---
