@@ -17,15 +17,13 @@ object PlayerStatesTable : UuidTable("player_states") {
 	val status = enumerationByName("status", STATUS_LENGTH, PlayerStatus::class).default(PlayerStatus.WAITING)
 
 	// Seeded from the game's board.startingGold when the player is created (see PlayerDao); free
-	// to rise and fall from there over the course of play. Can go negative -- that means the
+	// to rise and fall from there over the course of play. Can go negative; that means the
 	// player has spent more than they have on hand and owes an auction of their properties to get
 	// back in the positive (auction mechanics aren't implemented yet).
 	val currentGold = integer("current_gold")
 
 	// Card suits (SpaceType.HEART/DIAMOND/SPADE/CLUB, stored by name) this player has picked up
-	// by passing or landing on that type of space over the course of the game -- see
-	// GameSimulationService. Starts empty and only ever grows; picking up a suit already held
-	// has no effect (see PlayerDao.addHeldSuit).
+	// by passing or landing on that type of space over the course of the game
 	val heldSuits = array<String>("held_suits", VarCharColumnType(SPACE_TYPE_LENGTH)).default(emptyList())
 }
 

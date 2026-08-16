@@ -22,8 +22,8 @@ import kotlin.uuid.Uuid
  * everyone's ready, and playing out turns.
  *
  * A turn starts with a die roll, which sets how many spaces the current
- * player has left to move. They're moved forward automatically -- one space
- * at a time, decrementing that remaining movement -- for as long as the
+ * player has left to move. They're moved forward automatically, one space
+ * at a time, decrementing remaining movement, for as long as the
  * space they're on only has one path out of it. The moment they land
  * somewhere with more than one outgoing path, movement pauses: a human
  * player has to choose which branch to take (see [choosePath]) before
@@ -33,32 +33,28 @@ import kotlin.uuid.Uuid
  * chance to buy it (see [buyShop]/[declineShopPurchase]) before the turn
  * actually ends, while a computer player decides whether it wants to right
  * away, given its actual current gold (again see
- * [ComputerPlayer.shouldBuyShop]) and keeps going. Either way, a purchase
+ * [ComputerPlayer.shouldBuyShop]). Either way, a purchase
  * always requires enough gold on hand up front -- [buyShop] fails outright
  * for a human short on gold, and a computer player wanting a shop it can't
  * afford is simply treated the same as it not wanting one. Gold can still
  * go negative *after* a purchase, just from other causes not yet
- * implemented (see PlayerStatesTable.currentGold). The turn ends once
- * movement reaches zero with no choice or purchase decision pending, at
- * which point play moves to the next player in turn order -- announced
+ * implemented. The turn ends once
+ * movement reaches zero, at
+ * which point play moves to the next player in turn order. This is announced
  * with a [TurnEvent.TurnStarted] the moment that next player is a human,
  * since nothing else is going to happen until they roll themselves.
  * The game ends once turnNumber reaches maxTurns.
  *
- * Every space a player is moved onto along the way -- whether just passed through mid-move or
- * where they end up -- is also checked for a suit (HEART/DIAMOND/SPADE/CLUB, see SpaceType):
+ * Every space a player is moved onto along the way, whether just passed through mid-move or
+ * where they end up, is also checked for a suit (HEART/DIAMOND/SPADE/CLUB, see SpaceType):
  * landing on or passing one picks it up for that player (see PlayerDao.addHeldSuit), announced
- * with a [TurnEvent.SuitPickedUp] the first time, and silently ignored -- no event, no
- * duplicate -- every time after.
+ * with a [TurnEvent.SuitPickedUp] the first time, and silently ignored every time after.
  *
  * A player with no [com.fortuneavenue.server.models.player.db.Player.userId]
  * is a computer opponent -- there's nobody connected who could ready it up
  * or take its turns, so this service does that on its behalf: computer
  * players are auto-readied once every human is, and their turns are played
- * out automatically (roll and all) as soon as it's their turn -- including
- * right when the game starts, if one or more of them land at the front of
- * turn order, so the game can never get stuck waiting on a human who was
- * never first.
+ * out automatically (roll and all) as soon as it's their turn
  */
 @Service
 class GameSimulationService(
@@ -109,8 +105,7 @@ class GameSimulationService(
 
 		/**
 		 * [playerId] passed or landed on [spaceId], a suit space (HEART/DIAMOND/SPADE/CLUB), and
-		 * picked up [suit] for the first time this game. Passing or landing on a suit already
-		 * held has no effect and emits nothing instead -- see PlayerDao.addHeldSuit.
+		 * picked up [suit] while not having it already
 		 */
 		data class SuitPickedUp(
 			override val playerId: Uuid,
@@ -523,8 +518,7 @@ class GameSimulationService(
 	 * leading [TurnEvent.Moved], plus a [TurnEvent.SuitPickedUp] if that destination is a suit
 	 * space and picking it up was actually new (see [pickUpSuit]). Every space a player is moved
 	 * onto over the course of a turn -- passed through mid-move or landed on at the end --
-	 * flows through here exactly once, so a suit is picked up whether the space was merely
-	 * passed or is where movement actually stopped.
+	 * flows through here exactly once
 	 */
 	private fun applyMove(
 		playerId: Uuid,
