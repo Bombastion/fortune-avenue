@@ -36,7 +36,7 @@ class DistrictProgressionValidatorTest {
 	fun `a district with fewer than 2 spaces and no progressions produces no errors`() {
 		val req = request(
 			spaces = listOf(CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0)),
-			districts = listOf(CreateDistrictRequest("Red", "FF0000")),
+			districts = listOf(CreateDistrictRequest("Red", "FF0000", BigDecimal("0.5000"))),
 		)
 
 		assertThat(DistrictProgressionValidator.validate(req)).isEmpty()
@@ -46,7 +46,7 @@ class DistrictProgressionValidatorTest {
 	fun `a district with fewer than 2 spaces and a progression entry is rejected`() {
 		val req = request(
 			spaces = listOf(CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0)),
-			districts = listOf(CreateDistrictRequest("Red", "FF0000", progressions = listOf(progression(2)))),
+			districts = listOf(CreateDistrictRequest("Red", "FF0000", minimumStockPercentage = BigDecimal("0.5000"), progressions = listOf(progression(2)))),
 		)
 
 		val errors = DistrictProgressionValidator.validate(req)
@@ -62,7 +62,7 @@ class DistrictProgressionValidatorTest {
 				CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0),
 				CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0),
 			),
-			districts = listOf(CreateDistrictRequest("Red", "FF0000", progressions = listOf(progression(2)))),
+			districts = listOf(CreateDistrictRequest("Red", "FF0000", minimumStockPercentage = BigDecimal("0.5000"), progressions = listOf(progression(2)))),
 		)
 
 		assertThat(DistrictProgressionValidator.validate(req)).isEmpty()
@@ -73,13 +73,13 @@ class DistrictProgressionValidatorTest {
 		val spaces = List(3) { CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0) }
 		val complete = request(
 			spaces = spaces,
-			districts = listOf(CreateDistrictRequest("Red", "FF0000", progressions = listOf(progression(2), progression(3)))),
+			districts = listOf(CreateDistrictRequest("Red", "FF0000", minimumStockPercentage = BigDecimal("0.5000"), progressions = listOf(progression(2), progression(3)))),
 		)
 		assertThat(DistrictProgressionValidator.validate(complete)).isEmpty()
 
 		val missingOne = request(
 			spaces = spaces,
-			districts = listOf(CreateDistrictRequest("Red", "FF0000", progressions = listOf(progression(2)))),
+			districts = listOf(CreateDistrictRequest("Red", "FF0000", minimumStockPercentage = BigDecimal("0.5000"), progressions = listOf(progression(2)))),
 		)
 		val errors = DistrictProgressionValidator.validate(missingOne)
 
@@ -94,7 +94,7 @@ class DistrictProgressionValidatorTest {
 				CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0),
 				CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0),
 			),
-			districts = listOf(CreateDistrictRequest("Red", "FF0000")),
+			districts = listOf(CreateDistrictRequest("Red", "FF0000", BigDecimal("0.5000"))),
 		)
 
 		val errors = DistrictProgressionValidator.validate(req)
@@ -110,7 +110,7 @@ class DistrictProgressionValidatorTest {
 				CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0),
 				CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0),
 			),
-			districts = listOf(CreateDistrictRequest("Red", "FF0000", progressions = listOf(progression(2), progression(2)))),
+			districts = listOf(CreateDistrictRequest("Red", "FF0000", minimumStockPercentage = BigDecimal("0.5000"), progressions = listOf(progression(2), progression(2)))),
 		)
 
 		val errors = DistrictProgressionValidator.validate(req)
@@ -125,13 +125,13 @@ class DistrictProgressionValidatorTest {
 			CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0),
 		)
 
-		val zero = request(spaces = spaces, districts = listOf(CreateDistrictRequest("Red", "FF0000", progressions = listOf(progression(2, existing = "0.0000")))))
+		val zero = request(spaces = spaces, districts = listOf(CreateDistrictRequest("Red", "FF0000", minimumStockPercentage = BigDecimal("0.5000"), progressions = listOf(progression(2, existing = "0.0000")))))
 		assertThat(DistrictProgressionValidator.validate(zero)).isNotEmpty()
 
-		val negative = request(spaces = spaces, districts = listOf(CreateDistrictRequest("Red", "FF0000", progressions = listOf(progression(2, new = "-0.1000")))))
+		val negative = request(spaces = spaces, districts = listOf(CreateDistrictRequest("Red", "FF0000", minimumStockPercentage = BigDecimal("0.5000"), progressions = listOf(progression(2, new = "-0.1000")))))
 		assertThat(DistrictProgressionValidator.validate(negative)).isNotEmpty()
 
-		val wrongScale = request(spaces = spaces, districts = listOf(CreateDistrictRequest("Red", "FF0000", progressions = listOf(progression(2, existing = "0.1")))))
+		val wrongScale = request(spaces = spaces, districts = listOf(CreateDistrictRequest("Red", "FF0000", minimumStockPercentage = BigDecimal("0.5000"), progressions = listOf(progression(2, existing = "0.1")))))
 		assertThat(DistrictProgressionValidator.validate(wrongScale)).isNotEmpty()
 	}
 
@@ -143,7 +143,7 @@ class DistrictProgressionValidatorTest {
 		)
 		val req = request(
 			spaces = spaces,
-			districts = listOf(CreateDistrictRequest("Red", "FF0000", progressions = listOf(progression(2, existing = "1.5000", new = "2.0000")))),
+			districts = listOf(CreateDistrictRequest("Red", "FF0000", minimumStockPercentage = BigDecimal("0.5000"), progressions = listOf(progression(2, existing = "1.5000", new = "2.0000")))),
 		)
 
 		assertThat(DistrictProgressionValidator.validate(req)).isEmpty()

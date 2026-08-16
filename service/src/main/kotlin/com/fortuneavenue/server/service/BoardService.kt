@@ -49,6 +49,7 @@ class BoardService(
 				BoardDao.DistrictInput(
 					name = district.name,
 					colorHex = district.colorHex,
+					minimumStockPercentage = district.minimumStockPercentage,
 					progressionInputs = district.progressions.map {
 						BoardDao.ProgressionInput(it.ownedShopCount, it.existingShopBoostPercentage, it.newShopBoostPercentage)
 					},

@@ -101,7 +101,7 @@ class BoardDaoTest : DatabaseTest() {
 
 	@Test
 	fun `create persists districts and associates spaces with them via districtIndex`() {
-		val districts = listOf(BoardDao.DistrictInput("Red", "FF0000"))
+		val districts = listOf(BoardDao.DistrictInput("Red", "FF0000", BigDecimal("0.5000")))
 		val spaces = listOf(
 			BoardDao.SpaceInput(SpaceType.BASIC, districtIndex = 0),
 			BoardDao.SpaceInput(SpaceType.BASIC),
@@ -139,6 +139,7 @@ class BoardDaoTest : DatabaseTest() {
 			BoardDao.DistrictInput(
 				name = "Red",
 				colorHex = "FF0000",
+				minimumStockPercentage = BigDecimal("0.5000"),
 				progressionInputs = listOf(
 					BoardDao.ProgressionInput(2, BigDecimal("0.1000"), BigDecimal("0.1500")),
 					BoardDao.ProgressionInput(3, BigDecimal("0.0500"), BigDecimal("0.1000")),
@@ -182,6 +183,7 @@ class BoardDaoTest : DatabaseTest() {
 			BoardDao.DistrictInput(
 				name = "Red",
 				colorHex = "FF0000",
+				minimumStockPercentage = BigDecimal("0.5000"),
 				progressionInputs = listOf(BoardDao.ProgressionInput(2, BigDecimal("0.1000"), BigDecimal("0.1500"))),
 			),
 		)

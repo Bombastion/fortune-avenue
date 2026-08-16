@@ -27,7 +27,7 @@ class GameShopInformationDaoTest : DatabaseTest() {
 
 	/** A board with a district containing 2 SHOP spaces, plus a third SHOP space outside any district. */
 	private fun createBoardWithShops(): BoardGraph {
-		val districts = listOf(BoardDao.DistrictInput("Red", "FF0000"))
+		val districts = listOf(BoardDao.DistrictInput("Red", "FF0000", BigDecimal("0.5000")))
 		val spaces = listOf(
 			BoardDao.SpaceInput(SpaceType.SHOP, baseValue = 100, basePricePercentage = BigDecimal("0.2500"), districtIndex = 0),
 			BoardDao.SpaceInput(SpaceType.SHOP, baseValue = 200, basePricePercentage = BigDecimal("0.2500"), districtIndex = 0),
@@ -120,5 +120,22 @@ class GameShopInformationDaoTest : DatabaseTest() {
 
 		assertThat(owned).hasSize(1)
 		assertThat(owned.single().id.value).isEqualTo(inDistrictShops[0].id.value)
+	}
+
+	@Test
+	fun `findByGameAndDistrict returns every shop in that district regardless of owner`() {
+		val boardGraph = createBoardWithShops()
+		val gameId = createGameId(boardGraph.board.id.value)
+		val seeded = gameShopInformationDao.seedForGame(gameId, boardGraph)
+		val player = playerDao.create(gameId)
+		val districtId = boardGraph.districts.single().id
+
+		val inDistrictShops = seeded.filter { it.districtId == districtId }
+		// One shop owned, one left unowned -- both should still come back.
+		gameShopInformationDao.setOwner(inDistrictShops[0].id.value, player.id.value)
+
+		val found = gameShopInformationDao.findByGameAndDistrict(gameId, districtId)
+
+		assertThat(found.map { it.id.value }).containsExactlyInAnyOrderElementsOf(inDistrictShops.map { it.id.value })
 	}
 }

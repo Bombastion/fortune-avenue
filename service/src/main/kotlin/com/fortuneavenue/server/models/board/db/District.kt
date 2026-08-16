@@ -11,4 +11,5 @@ class District(id: EntityID<Uuid>) : UuidEntity(id) {
 	var boardId by DistrictsTable.boardId
 	var name by DistrictsTable.name
 	var colorHex by DistrictsTable.colorHex
+	var minimumStockPercentage by DistrictsTable.minimumStockPercentage
 }

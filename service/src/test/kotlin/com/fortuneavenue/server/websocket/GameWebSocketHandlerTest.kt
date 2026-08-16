@@ -247,6 +247,7 @@ class GameWebSocketHandlerTest : DatabaseTest() {
 				CreateDistrictRequest(
 					name = "Red",
 					colorHex = "FF0000",
+					minimumStockPercentage = BigDecimal("0.5000"),
 					progressions = listOf(
 						CreateDistrictProgressionRequest(
 							ownedShopCount = 2,

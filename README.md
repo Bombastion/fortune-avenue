@@ -48,6 +48,7 @@ curl -s -X POST http://localhost:8080/boards \
       {
         "name": "Blue District",
         "colorHex": "1E90FF",
+        "minimumStockPercentage": 0.5000,
         "progressions": [
           { "ownedShopCount": 2, "existingShopBoostPercentage": 0.1000, "newShopBoostPercentage": 0.1500 }
         ]
@@ -74,6 +75,8 @@ curl -s -X POST http://localhost:8080/games/GAME_ID/players \
 `userId` on the player call is optional — omit it (or pass `{}`) for an anonymous player. Repeat the user/player steps to add more players; a game needs at least one player, but `markReady` only starts the game once every player in it has readied up.
 
 A district's `progressions` describe how shop values there scale as a single player accumulates more of them: `existingShopBoostPercentage` is applied to shops the player already owns in the district, and `newShopBoostPercentage` (typically larger, to make up for missing out on earlier boosts) is applied to the one they just bought. Any district with 2 or more spaces needs exactly one entry per `ownedShopCount` from 2 up to its total space count; a district with fewer spaces needs none.
+
+A district's `minimumStockPercentage` is the floor, as a fraction of the average value of its SHOP spaces, that its stock can trade at once a game starts -- a positive decimal strictly between 0 and 1 with exactly 4 digits (e.g. `0.5000` means the stock can never trade below half the district's average shop value). When a game starts, this is copied onto a per-game `game_district_information` row along with the computed `currentStockValue` -- the average `currentValue` of the district's shops at that moment, multiplied by `minimumStockPercentage` -- for every district that actually contains at least one SHOP space.
 
 A board's `startingGold` is how much gold every player in a game on that board starts with -- it's copied onto each player's state the moment they're added to a game (see `POST /games/{gameId}/players` below).
 

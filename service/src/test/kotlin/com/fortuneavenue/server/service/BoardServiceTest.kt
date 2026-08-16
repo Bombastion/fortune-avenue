@@ -140,7 +140,7 @@ class BoardServiceTest {
 	fun `a board with a valid district is validated then persisted via the DAO`() {
 		val request = validRequest().let { req ->
 			req.copy(
-				districts = listOf(CreateDistrictRequest("Red", "FF0000")),
+				districts = listOf(CreateDistrictRequest("Red", "FF0000", BigDecimal("0.5000"))),
 				spaces = req.spaces.mapIndexed { index, space -> if (index == 0) space.copy(districtIndex = 0) else space },
 			)
 		}
@@ -155,7 +155,7 @@ class BoardServiceTest {
 			)
 		}
 		val expectedPathInputs = request.paths.map { BoardDao.PathInput(it.from, it.to, it.branchOrder) }
-		val expectedDistrictInputs = request.districts.map { BoardDao.DistrictInput(it.name, it.colorHex) }
+		val expectedDistrictInputs = request.districts.map { BoardDao.DistrictInput(it.name, it.colorHex, it.minimumStockPercentage) }
 
 		given(
 			boardDao.create(request.name, expectedSpaceInputs, expectedPathInputs, request.startSpaceIndex, expectedDistrictInputs),
@@ -169,7 +169,7 @@ class BoardServiceTest {
 
 	@Test
 	fun `a district with a malformed colorHex is rejected without ever touching the DAO`() {
-		val request = validRequest().copy(districts = listOf(CreateDistrictRequest("Red", "nope")))
+		val request = validRequest().copy(districts = listOf(CreateDistrictRequest("Red", "nope", BigDecimal("0.5000"))))
 
 		val result = boardService.createBoard(request)
 
@@ -196,7 +196,7 @@ class BoardServiceTest {
 		val progression = CreateDistrictProgressionRequest(2, BigDecimal("0.1000"), BigDecimal("0.1500"))
 		val request = validRequest().let { req ->
 			req.copy(
-				districts = listOf(CreateDistrictRequest("Red", "FF0000", progressions = listOf(progression))),
+				districts = listOf(CreateDistrictRequest("Red", "FF0000", minimumStockPercentage = BigDecimal("0.5000"), progressions = listOf(progression))),
 				spaces = req.spaces.mapIndexed { index, space -> if (index <= 1) space.copy(districtIndex = 0) else space },
 			)
 		}
@@ -215,6 +215,7 @@ class BoardServiceTest {
 			BoardDao.DistrictInput(
 				name = "Red",
 				colorHex = "FF0000",
+				minimumStockPercentage = BigDecimal("0.5000"),
 				progressionInputs = listOf(BoardDao.ProgressionInput(2, BigDecimal("0.1000"), BigDecimal("0.1500"))),
 			),
 		)
@@ -233,7 +234,7 @@ class BoardServiceTest {
 	fun `a district missing required progression levels is rejected without ever touching the DAO`() {
 		val request = validRequest().let { req ->
 			req.copy(
-				districts = listOf(CreateDistrictRequest("Red", "FF0000")),
+				districts = listOf(CreateDistrictRequest("Red", "FF0000", BigDecimal("0.5000"))),
 				spaces = req.spaces.mapIndexed { index, space -> if (index <= 1) space.copy(districtIndex = 0) else space },
 			)
 		}

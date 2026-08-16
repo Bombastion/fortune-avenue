@@ -129,7 +129,7 @@ class BoardControllerTest : DatabaseTest() {
 	@Test
 	fun `creating a board with a district returns it and links referencing spaces to it`() {
 		val request = validRequest("district-${Uuid.random()}").copy(
-			districts = listOf(CreateDistrictRequest("Red", "FF0000")),
+			districts = listOf(CreateDistrictRequest("Red", "FF0000", BigDecimal("0.5000"))),
 			spaces = listOf(
 				CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0),
 				CreateBoardSpaceRequest(SpaceType.BASIC),
@@ -154,7 +154,7 @@ class BoardControllerTest : DatabaseTest() {
 	@Test
 	fun `creating a board with a district that has an invalid colorHex returns 400`() {
 		val request = validRequest("district-invalid-${Uuid.random()}").copy(
-			districts = listOf(CreateDistrictRequest("Red", "not-a-color")),
+			districts = listOf(CreateDistrictRequest("Red", "not-a-color", BigDecimal("0.5000"))),
 		)
 
 		val response = restTemplate.postForEntity<ErrorResponse>("/boards", request)
@@ -170,6 +170,7 @@ class BoardControllerTest : DatabaseTest() {
 				CreateDistrictRequest(
 					name = "Red",
 					colorHex = "FF0000",
+					minimumStockPercentage = BigDecimal("0.5000"),
 					progressions = listOf(CreateDistrictProgressionRequest(2, BigDecimal("0.1000"), BigDecimal("0.1500"))),
 				),
 			),
@@ -194,7 +195,7 @@ class BoardControllerTest : DatabaseTest() {
 	@Test
 	fun `creating a board with a district missing required progression levels returns 400`() {
 		val request = validRequest("district-progression-missing-${Uuid.random()}").copy(
-			districts = listOf(CreateDistrictRequest("Red", "FF0000")),
+			districts = listOf(CreateDistrictRequest("Red", "FF0000", BigDecimal("0.5000"))),
 			spaces = listOf(
 				CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0),
 				CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0),

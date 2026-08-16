@@ -2,6 +2,7 @@ package com.fortuneavenue.server.service
 
 import com.fortuneavenue.server.dao.BoardDao
 import com.fortuneavenue.server.dao.GameDao
+import com.fortuneavenue.server.dao.GameDistrictInformationDao
 import com.fortuneavenue.server.dao.GameShopInformationDao
 import com.fortuneavenue.server.dao.PlayerDao
 import com.fortuneavenue.server.models.board.db.Board
@@ -30,6 +31,7 @@ import org.mockito.Mockito.lenient
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.never
 import org.mockito.Mockito.verify
+import org.mockito.Mockito.verifyNoInteractions
 import org.mockito.junit.jupiter.MockitoExtension
 import java.math.BigDecimal
 import kotlin.uuid.Uuid
@@ -50,6 +52,9 @@ class GameSimulationServiceTest {
 	lateinit var gameShopInformationDao: GameShopInformationDao
 
 	@Mock
+	lateinit var gameDistrictInformationDao: GameDistrictInformationDao
+
+	@Mock
 	lateinit var dice: Dice
 
 	@Mock
@@ -62,7 +67,7 @@ class GameSimulationServiceTest {
 
 	@BeforeEach
 	fun setUp() {
-		service = GameSimulationService(gameDao, playerDao, boardDao, gameShopInformationDao, dice, computerPlayer)
+		service = GameSimulationService(gameDao, playerDao, boardDao, gameShopInformationDao, gameDistrictInformationDao, dice, computerPlayer)
 	}
 
 	/** [userId] defaults to a human player -- pass null to mock a computer player instead. */
@@ -881,6 +886,26 @@ class GameSimulationServiceTest {
 		verify(gameShopInformationDao).seedForGame(gameId, boardGraph)
 	}
 
+	@Test
+	fun `markReady also seeds per-game district stock information, from the just-seeded shops`() {
+		val playerId = Uuid.random()
+		val game = mockGame()
+		val player = mockPlayer(playerId)
+		val board = mockBoard()
+		val boardGraph = BoardGraph(board = board, spaces = emptyList(), paths = emptyList())
+		val startedGame = mockGame(turnOrder = listOf(playerId))
+		val seededShops = listOf(mock(GameShopInformation::class.java))
+		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
+		given(gameDao.startGame(gameId, listOf(playerId))).willReturn(startedGame)
+		given(boardDao.findById(boardId)).willReturn(boardGraph)
+		given(gameShopInformationDao.seedForGame(gameId, boardGraph)).willReturn(seededShops)
+
+		service.markReady(gameId, playerId)
+
+		verify(gameDistrictInformationDao).seedForGame(gameId, boardGraph, seededShops)
+	}
+
 	// --- shop purchases ---
 
 	@Test
@@ -1035,6 +1060,8 @@ class GameSimulationServiceTest {
 		given(gameShopInformationDao.findOwnedByPlayerInDistrict(gameId, playerId, newShop.districtId!!))
 			.willReturn(listOf(newShop, existingShop))
 		given(boardDao.findDistrictValueProgression(newShop.districtId!!, 2)).willReturn(progression)
+		given(gameShopInformationDao.findByGameAndDistrict(gameId, newShop.districtId!!))
+			.willReturn(listOf(newShop, existingShop))
 		given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
 
 		val result = service.buyShop(gameId, playerId)
@@ -1049,6 +1076,9 @@ class GameSimulationServiceTest {
 		assertThat(recalculated.newValuesBySpaceId[otherSpaceId]).isEqualTo(220)
 		verify(gameShopInformationDao).setCurrentValue(newShop.id.value, 120)
 		verify(gameShopInformationDao).setCurrentValue(existingShop.id.value, 220)
+		// The district's stock is re-averaged from every shop in it (re-read after the boosts
+		// above), not just the two that were just boosted.
+		verify(gameDistrictInformationDao).recalculateCurrentStockValue(gameId, newShop.districtId!!, listOf(newShop, existingShop))
 	}
 
 	@Test
@@ -1075,6 +1105,8 @@ class GameSimulationServiceTest {
 			GameSimulationService.TurnEvent.TurnEnded(playerId, 0, gameOver = false),
 			GameSimulationService.TurnEvent.TurnStarted(playerId, 1),
 		)
+		// Nothing boosted, so nothing for the district's stock value to be re-averaged from.
+		verifyNoInteractions(gameDistrictInformationDao)
 	}
 
 	@Test

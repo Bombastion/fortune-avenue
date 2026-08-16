@@ -60,6 +60,19 @@ class GameShopInformationDao {
 		}.toList()
 	}
 
+	/**
+	 * Every shop in [districtId], regardless of owner (or lack of one) -- unlike
+	 * [findOwnedByPlayerInDistrict], which only returns one player's shops there. Used to
+	 * recompute a district's current_stock_value, which averages every shop in the district (see
+	 * GameDistrictInformationDao.recalculateCurrentStockValue).
+	 */
+	fun findByGameAndDistrict(gameId: Uuid, districtId: EntityID<Uuid>): List<GameShopInformation> = transaction {
+		GameShopInformation.find {
+			(GameShopInformationTable.gameId eq EntityID(gameId, GamesTable)) and
+				(GameShopInformationTable.districtId eq districtId)
+		}.toList()
+	}
+
 	fun setOwner(id: Uuid, playerId: Uuid): GameShopInformation? = transaction {
 		GameShopInformation.findById(id)?.apply { ownerId = EntityID(playerId, PlayersTable) }
 	}
