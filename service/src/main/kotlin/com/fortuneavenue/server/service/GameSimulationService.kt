@@ -50,6 +50,11 @@ import kotlin.uuid.Uuid
  * landing on or passing one picks it up for that player (see PlayerDao.addHeldSuit), announced
  * with a [TurnEvent.SuitPickedUp] the first time, and silently ignored every time after.
  *
+ * The same is true of a BANK space, but the other direction: passing or landing on one while
+ * currently holding all 4 suits triggers a promotion (see PlayerDao.clearHeldSuitsIfComplete),
+ * clearing every suit the player holds and announcing it with a [TurnEvent.Promoted]. A BANK
+ * space is otherwise a no-op -- nothing happens visiting one without every suit in hand.
+ *
  * A player with no [com.fortuneavenue.server.models.player.db.Player.userId]
  * is a computer opponent -- there's nobody connected who could ready it up
  * or take its turns, so this service does that on its behalf: computer
@@ -111,6 +116,16 @@ class GameSimulationService(
 			override val playerId: Uuid,
 			val spaceId: Uuid,
 			val suit: SpaceType,
+		) : TurnEvent
+
+		/**
+		 * [playerId] passed or landed on [spaceId], a BANK space, while holding all 4 suits
+		 * (HEART/DIAMOND/SPADE/CLUB) -- triggering a promotion that clears every suit from their
+		 * inventory. Not emitted for a BANK space visited without every suit already held.
+		 */
+		data class Promoted(
+			override val playerId: Uuid,
+			val spaceId: Uuid,
 		) : TurnEvent
 
 		/** Movement is paused on [spaceId] until [choosePath] is called with one of [options]. */
@@ -516,9 +531,10 @@ class GameSimulationService(
 	/**
 	 * Moves [playerId] onto [path]'s destination and returns the resulting events -- always a
 	 * leading [TurnEvent.Moved], plus a [TurnEvent.SuitPickedUp] if that destination is a suit
-	 * space and picking it up was actually new (see [pickUpSuit]). Every space a player is moved
-	 * onto over the course of a turn -- passed through mid-move or landed on at the end --
-	 * flows through here exactly once
+	 * space and picking it up was actually new (see [pickUpSuit]), plus a [TurnEvent.Promoted] if
+	 * it's a BANK space reached while holding all 4 suits (see [checkPromotion]). Every space a
+	 * player is moved onto over the course of a turn -- passed through mid-move or landed on at
+	 * the end -- flows through here exactly once
 	 */
 	private fun applyMove(
 		playerId: Uuid,
@@ -530,7 +546,9 @@ class GameSimulationService(
 	): List<TurnEvent> {
 		playerDao.updatePosition(playerId, path.toSpaceId.value)
 		val moved = TurnEvent.Moved(playerId, turnNumber, fromSpaceId, path.toSpaceId.value, movementPointsRemaining)
-		return listOf(moved) + pickUpSuit(playerId, path.toSpaceId.value, boardGraph)
+		return listOf(moved) +
+			pickUpSuit(playerId, path.toSpaceId.value, boardGraph) +
+			checkPromotion(playerId, path.toSpaceId.value, boardGraph)
 	}
 
 	/**
@@ -544,6 +562,20 @@ class GameSimulationService(
 		val pickedUp = playerDao.addHeldSuit(playerId, suit) ?: return emptyList()
 
 		return if (pickedUp) listOf(TurnEvent.SuitPickedUp(playerId, spaceId, suit)) else emptyList()
+	}
+
+	/**
+	 * [spaceId] triggers a promotion for [playerId] if it's a BANK space (see [SpaceType]) and
+	 * they currently hold all 4 suits (see [PlayerDao.clearHeldSuitsIfComplete]) -- clearing
+	 * their held suits entirely. A no-op, emitting nothing, for any other space type or a player
+	 * who doesn't hold every suit yet.
+	 */
+	private fun checkPromotion(playerId: Uuid, spaceId: Uuid, boardGraph: BoardGraph): List<TurnEvent> {
+		boardGraph.spaces.find { it.id.value == spaceId }?.spaceType?.takeIf { it == SpaceType.BANK }
+			?: return emptyList()
+		val promoted = playerDao.clearHeldSuitsIfComplete(playerId, SUIT_SPACE_TYPES) ?: return emptyList()
+
+		return if (promoted) listOf(TurnEvent.Promoted(playerId, spaceId)) else emptyList()
 	}
 
 	/** Only chains into the next player(s) once [movement] actually ended the turn rather than pausing on a choice. */

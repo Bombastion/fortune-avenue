@@ -80,6 +80,24 @@ class PlayerDao {
 		}
 	}
 
+	/**
+	 * Clears [playerId]'s held suits entirely, but only if they currently hold every one of
+	 * [requiredSuits] -- a promotion trigger (see GameSimulationService, which drives this
+	 * whenever a player passes or lands on a BANK space). Returns whether they actually held
+	 * every suit (and so were cleared) -- a player missing even one is left untouched -- or null
+	 * if the player has no state at all.
+	 */
+	fun clearHeldSuitsIfComplete(playerId: Uuid, requiredSuits: Set<SpaceType>): Boolean? = transaction {
+		val state = findStateEntity(playerId) ?: return@transaction null
+
+		if (requiredSuits.all { it.name in state.heldSuits }) {
+			state.heldSuits = emptyList()
+			true
+		} else {
+			false
+		}
+	}
+
 	// Not itself wrapped in a transaction -- only ever called from within one
 	// of the transaction {} blocks above.
 	private fun findStateEntity(playerId: Uuid): PlayerState? =

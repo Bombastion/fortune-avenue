@@ -174,6 +174,39 @@ class PlayerDaoTest : DatabaseTest() {
 		assertThat(result).isNull()
 	}
 
+	private val allSuits = setOf(SpaceType.HEART, SpaceType.DIAMOND, SpaceType.SPADE, SpaceType.CLUB)
+
+	@Test
+	fun `clearHeldSuitsIfComplete clears every held suit once all 4 are held`() {
+		val player = playerDao.create(gameId = createGame().id.value)
+		allSuits.forEach { playerDao.addHeldSuit(player.id.value, it) }
+
+		val cleared = playerDao.clearHeldSuitsIfComplete(player.id.value, allSuits)
+
+		assertThat(cleared).isTrue()
+		assertThat(playerDao.findState(player.id.value)!!.heldSuits).isEmpty()
+	}
+
+	@Test
+	fun `clearHeldSuitsIfComplete leaves held suits untouched when even one is missing`() {
+		val player = playerDao.create(gameId = createGame().id.value)
+		playerDao.addHeldSuit(player.id.value, SpaceType.HEART)
+		playerDao.addHeldSuit(player.id.value, SpaceType.DIAMOND)
+		playerDao.addHeldSuit(player.id.value, SpaceType.SPADE)
+
+		val cleared = playerDao.clearHeldSuitsIfComplete(player.id.value, allSuits)
+
+		assertThat(cleared).isFalse()
+		assertThat(playerDao.findState(player.id.value)!!.heldSuits).containsExactlyInAnyOrder("HEART", "DIAMOND", "SPADE")
+	}
+
+	@Test
+	fun `clearHeldSuitsIfComplete returns null for a player id that does not exist`() {
+		val result = playerDao.clearHeldSuitsIfComplete(Uuid.random(), allSuits)
+
+		assertThat(result).isNull()
+	}
+
 	@Test
 	fun `create persists a player with no user, for a future computer opponent`() {
 		val game = createGame()

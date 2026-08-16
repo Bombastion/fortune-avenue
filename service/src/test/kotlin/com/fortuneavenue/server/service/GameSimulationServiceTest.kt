@@ -833,6 +833,133 @@ class GameSimulationServiceTest {
 		assertThat(result.getOrNull()?.filterIsInstance<GameSimulationService.TurnEvent.SuitPickedUp>()).isEmpty()
 	}
 
+	// --- promotions ---
+
+	private val allSuits = setOf(SpaceType.HEART, SpaceType.DIAMOND, SpaceType.SPADE, SpaceType.CLUB)
+
+	@Test
+	fun `rollDice landing on a BANK space while holding all 4 suits triggers a promotion`() {
+		val playerId = Uuid.random()
+		val startSpaceId = Uuid.random()
+		val nextSpaceId = Uuid.random()
+		val game = mockGame(turnOrder = listOf(playerId), turnNumber = 0, maxTurns = 10)
+		val player = mockPlayer(playerId)
+		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = null)
+		val board = mockBoard(startSpaceId = startSpaceId)
+		val path = mockPath(from = startSpaceId, to = nextSpaceId, branchOrder = 0)
+		val space = mockSpace(nextSpaceId, SpaceType.BANK)
+		val boardGraph = BoardGraph(board = board, spaces = listOf(space), paths = listOf(path))
+		val advancedGame = mockGame(turnOrder = listOf(playerId), turnNumber = 1, maxTurns = 10)
+		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
+		given(playerDao.findState(playerId)).willReturn(playerState)
+		given(boardDao.findById(boardId)).willReturn(boardGraph)
+		given(dice.roll()).willReturn(1)
+		given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
+		given(playerDao.clearHeldSuitsIfComplete(playerId, allSuits)).willReturn(true)
+
+		val result = service.rollDice(gameId, playerId)
+
+		val events = result.getOrNull()
+		assertThat(events).containsExactly(
+			GameSimulationService.TurnEvent.DiceRolled(playerId, 1),
+			GameSimulationService.TurnEvent.Moved(playerId, 0, startSpaceId, nextSpaceId, 0),
+			GameSimulationService.TurnEvent.Promoted(playerId, nextSpaceId),
+			GameSimulationService.TurnEvent.TurnEnded(playerId, 0, gameOver = false),
+			GameSimulationService.TurnEvent.TurnStarted(playerId, 1),
+		)
+		verify(playerDao).clearHeldSuitsIfComplete(playerId, allSuits)
+	}
+
+	@Test
+	fun `rollDice passing through a BANK space mid-move while holding all 4 suits also triggers a promotion`() {
+		val playerId = Uuid.random()
+		val spaceA = Uuid.random()
+		val spaceB = Uuid.random()
+		val spaceC = Uuid.random()
+		val game = mockGame(turnOrder = listOf(playerId))
+		val player = mockPlayer(playerId)
+		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceA)
+		val board = mockBoard()
+		val passedSpace = mockSpace(spaceB, SpaceType.BANK)
+		val boardGraph = BoardGraph(
+			board = board,
+			spaces = listOf(passedSpace),
+			paths = listOf(mockPath(spaceA, spaceB, 0), mockPath(spaceB, spaceC, 0)),
+		)
+		val advancedGame = mockGame(turnOrder = listOf(playerId), turnNumber = 1)
+		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
+		given(playerDao.findState(playerId)).willReturn(playerState)
+		given(boardDao.findById(boardId)).willReturn(boardGraph)
+		given(dice.roll()).willReturn(2)
+		given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
+		given(playerDao.clearHeldSuitsIfComplete(playerId, allSuits)).willReturn(true)
+
+		val result = service.rollDice(gameId, playerId)
+
+		val events = result.getOrNull()
+		assertThat(events).contains(GameSimulationService.TurnEvent.Promoted(playerId, spaceB))
+		verify(playerDao).clearHeldSuitsIfComplete(playerId, allSuits)
+	}
+
+	@Test
+	fun `rollDice landing on a BANK space without all 4 suits emits no Promoted event`() {
+		val playerId = Uuid.random()
+		val startSpaceId = Uuid.random()
+		val nextSpaceId = Uuid.random()
+		val game = mockGame(turnOrder = listOf(playerId), turnNumber = 0, maxTurns = 10)
+		val player = mockPlayer(playerId)
+		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = null)
+		val board = mockBoard(startSpaceId = startSpaceId)
+		val path = mockPath(from = startSpaceId, to = nextSpaceId, branchOrder = 0)
+		val space = mockSpace(nextSpaceId, SpaceType.BANK)
+		val boardGraph = BoardGraph(board = board, spaces = listOf(space), paths = listOf(path))
+		val advancedGame = mockGame(turnOrder = listOf(playerId), turnNumber = 1, maxTurns = 10)
+		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
+		given(playerDao.findState(playerId)).willReturn(playerState)
+		given(boardDao.findById(boardId)).willReturn(boardGraph)
+		given(dice.roll()).willReturn(1)
+		given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
+		given(playerDao.clearHeldSuitsIfComplete(playerId, allSuits)).willReturn(false)
+
+		val result = service.rollDice(gameId, playerId)
+
+		val events = result.getOrNull()
+		assertThat(events).containsExactly(
+			GameSimulationService.TurnEvent.DiceRolled(playerId, 1),
+			GameSimulationService.TurnEvent.Moved(playerId, 0, startSpaceId, nextSpaceId, 0),
+			GameSimulationService.TurnEvent.TurnEnded(playerId, 0, gameOver = false),
+			GameSimulationService.TurnEvent.TurnStarted(playerId, 1),
+		)
+	}
+
+	@Test
+	fun `rollDice landing on a non-BANK space never calls clearHeldSuitsIfComplete`() {
+		val playerId = Uuid.random()
+		val startSpaceId = Uuid.random()
+		val nextSpaceId = Uuid.random()
+		val game = mockGame(turnOrder = listOf(playerId), turnNumber = 0, maxTurns = 10)
+		val player = mockPlayer(playerId)
+		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = null)
+		val board = mockBoard(startSpaceId = startSpaceId)
+		val path = mockPath(from = startSpaceId, to = nextSpaceId, branchOrder = 0)
+		val space = mockSpace(nextSpaceId, SpaceType.BASIC)
+		val boardGraph = BoardGraph(board = board, spaces = listOf(space), paths = listOf(path))
+		val advancedGame = mockGame(turnOrder = listOf(playerId), turnNumber = 1, maxTurns = 10)
+		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
+		given(playerDao.findState(playerId)).willReturn(playerState)
+		given(boardDao.findById(boardId)).willReturn(boardGraph)
+		given(dice.roll()).willReturn(1)
+		given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
+
+		service.rollDice(gameId, playerId)
+
+		verify(playerDao, never()).clearHeldSuitsIfComplete(playerId, allSuits)
+	}
+
 	// --- choosePath ---
 
 	@Test
