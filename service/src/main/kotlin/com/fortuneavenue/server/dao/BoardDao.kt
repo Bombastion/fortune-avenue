@@ -41,7 +41,12 @@ class BoardDao {
 	)
 	data class PathInput(val fromIndex: Int, val toIndex: Int, val branchOrder: Int)
 	data class ProgressionInput(val ownedShopCount: Int, val existingShopBoostPercentage: BigDecimal, val newShopBoostPercentage: BigDecimal)
-	data class DistrictInput(val name: String, val colorHex: String, val progressionInputs: List<ProgressionInput> = emptyList())
+	data class DistrictInput(
+		val name: String,
+		val colorHex: String,
+		val minimumStockPercentage: BigDecimal,
+		val progressionInputs: List<ProgressionInput> = emptyList(),
+	)
 
 	fun create(
 		name: String,
@@ -73,6 +78,7 @@ class BoardDao {
 				// `this.name = name` above for Board.new).
 				this.name = input.name
 				colorHex = input.colorHex
+				minimumStockPercentage = input.minimumStockPercentage
 			}
 		}
 		districts.firstOrNull()?.flush()

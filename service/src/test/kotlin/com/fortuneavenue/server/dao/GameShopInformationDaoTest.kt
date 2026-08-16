@@ -27,7 +27,7 @@ class GameShopInformationDaoTest : DatabaseTest() {
 
 	/** A board with a district containing 2 SHOP spaces, plus a third SHOP space outside any district. */
 	private fun createBoardWithShops(): BoardGraph {
-		val districts = listOf(BoardDao.DistrictInput("Red", "FF0000"))
+		val districts = listOf(BoardDao.DistrictInput("Red", "FF0000", BigDecimal("0.5000")))
 		val spaces = listOf(
 			BoardDao.SpaceInput(SpaceType.SHOP, baseValue = 100, basePricePercentage = BigDecimal("0.2500"), districtIndex = 0),
 			BoardDao.SpaceInput(SpaceType.SHOP, baseValue = 200, basePricePercentage = BigDecimal("0.2500"), districtIndex = 0),

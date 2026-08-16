@@ -2,6 +2,7 @@ package com.fortuneavenue.server.service
 
 import com.fortuneavenue.server.dao.BoardDao
 import com.fortuneavenue.server.dao.GameDao
+import com.fortuneavenue.server.dao.GameDistrictInformationDao
 import com.fortuneavenue.server.dao.GameShopInformationDao
 import com.fortuneavenue.server.dao.PlayerDao
 import com.fortuneavenue.server.models.board.db.BoardGraph
@@ -58,6 +59,7 @@ class GameSimulationService(
 	private val playerDao: PlayerDao,
 	private val boardDao: BoardDao,
 	private val gameShopInformationDao: GameShopInformationDao,
+	private val gameDistrictInformationDao: GameDistrictInformationDao,
 	private val dice: Dice,
 	private val computerPlayer: ComputerPlayer,
 ) {
@@ -183,10 +185,13 @@ class GameSimulationService(
 		val startedGame = gameDao.startGame(gameId, turnOrder)
 
 		// The game only ever starts once (guarded by the turnOrder check above), so this is the
-		// one moment a per-game copy of the board's shops needs to be seeded -- see
-		// GameShopInformationDao.seedForGame.
+		// one moment a per-game copy of the board's shops (and each district's stock) needs to be
+		// seeded -- see GameShopInformationDao.seedForGame and GameDistrictInformationDao.seedForGame.
 		if (startedGame != null) {
-			boardDao.findById(game.boardId.value)?.let { boardGraph -> gameShopInformationDao.seedForGame(gameId, boardGraph) }
+			boardDao.findById(game.boardId.value)?.let { boardGraph ->
+				val seededShops = gameShopInformationDao.seedForGame(gameId, boardGraph)
+				gameDistrictInformationDao.seedForGame(gameId, boardGraph, seededShops)
+			}
 		}
 
 		// If the shuffle put one or more computer players at the front,

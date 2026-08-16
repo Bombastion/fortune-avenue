@@ -2,6 +2,7 @@ package com.fortuneavenue.server.service
 
 import com.fortuneavenue.server.dao.BoardDao
 import com.fortuneavenue.server.dao.GameDao
+import com.fortuneavenue.server.dao.GameDistrictInformationDao
 import com.fortuneavenue.server.dao.GameShopInformationDao
 import com.fortuneavenue.server.dao.PlayerDao
 import com.fortuneavenue.server.models.board.db.Board
@@ -50,6 +51,9 @@ class GameSimulationServiceTest {
 	lateinit var gameShopInformationDao: GameShopInformationDao
 
 	@Mock
+	lateinit var gameDistrictInformationDao: GameDistrictInformationDao
+
+	@Mock
 	lateinit var dice: Dice
 
 	@Mock
@@ -62,7 +66,7 @@ class GameSimulationServiceTest {
 
 	@BeforeEach
 	fun setUp() {
-		service = GameSimulationService(gameDao, playerDao, boardDao, gameShopInformationDao, dice, computerPlayer)
+		service = GameSimulationService(gameDao, playerDao, boardDao, gameShopInformationDao, gameDistrictInformationDao, dice, computerPlayer)
 	}
 
 	/** [userId] defaults to a human player -- pass null to mock a computer player instead. */
@@ -879,6 +883,26 @@ class GameSimulationServiceTest {
 		service.markReady(gameId, playerId)
 
 		verify(gameShopInformationDao).seedForGame(gameId, boardGraph)
+	}
+
+	@Test
+	fun `markReady also seeds per-game district stock information, from the just-seeded shops`() {
+		val playerId = Uuid.random()
+		val game = mockGame()
+		val player = mockPlayer(playerId)
+		val board = mockBoard()
+		val boardGraph = BoardGraph(board = board, spaces = emptyList(), paths = emptyList())
+		val startedGame = mockGame(turnOrder = listOf(playerId))
+		val seededShops = listOf(mock(GameShopInformation::class.java))
+		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
+		given(gameDao.startGame(gameId, listOf(playerId))).willReturn(startedGame)
+		given(boardDao.findById(boardId)).willReturn(boardGraph)
+		given(gameShopInformationDao.seedForGame(gameId, boardGraph)).willReturn(seededShops)
+
+		service.markReady(gameId, playerId)
+
+		verify(gameDistrictInformationDao).seedForGame(gameId, boardGraph, seededShops)
 	}
 
 	// --- shop purchases ---
