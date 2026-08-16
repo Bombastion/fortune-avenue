@@ -55,11 +55,7 @@ class GameDistrictInformationDao {
 	 * every shop in the district (see [com.fortuneavenue.server.dao.GameShopInformationDao.findByGameAndDistrict]),
 	 * not just the ones whose value just changed: a purchase's district value progression only
 	 * boosts the shops the buyer owns there, but current_stock_value averages every shop in the
-	 * district regardless of owner. A no-op (returns null) if [districtId] has no seeded row --
-	 * shouldn't happen in practice, since a recalculation is only ever triggered by a purchase in
-	 * a district that already has at least one shop (the one just bought), and seedForGame always
-	 * seeds a row for any district with a SHOP space. Called after a district value progression
-	 * updates its shops' currentValue (see GameSimulationService.purchaseShop).
+	 * district regardless of owner. A no-op (returns null) if [districtId] has no seeded row
 	 */
 	fun recalculateCurrentStockValue(gameId: Uuid, districtId: EntityID<Uuid>, shops: List<GameShopInformation>): GameDistrictInformation? = transaction {
 		if (shops.isEmpty()) return@transaction null
