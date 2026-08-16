@@ -80,10 +80,10 @@ class GameDistrictInformationDaoTest : DatabaseTest() {
 
 	@Test
 	fun `seedForGame rounds current stock value to the nearest whole gold`() {
-		val districts = listOf(BoardDao.DistrictInput("Red", "FF0000", BigDecimal("1.0000")))
+		val districts = listOf(BoardDao.DistrictInput("Red", "FF0000", BigDecimal("0.2500")))
 		val spaces = listOf(
-			BoardDao.SpaceInput(SpaceType.SHOP, baseValue = 100, basePricePercentage = BigDecimal("0.2500"), districtIndex = 0),
-			BoardDao.SpaceInput(SpaceType.SHOP, baseValue = 101, basePricePercentage = BigDecimal("0.2500"), districtIndex = 0),
+			BoardDao.SpaceInput(SpaceType.SHOP, baseValue = 1, basePricePercentage = BigDecimal("0.2500"), districtIndex = 0),
+			BoardDao.SpaceInput(SpaceType.SHOP, baseValue = 3, basePricePercentage = BigDecimal("0.2500"), districtIndex = 0),
 		)
 		val paths = listOf(BoardDao.PathInput(0, 1, 0), BoardDao.PathInput(1, 0, 0))
 		val boardGraph = boardDao.create(
@@ -98,8 +98,8 @@ class GameDistrictInformationDaoTest : DatabaseTest() {
 
 		val seeded = gameDistrictInformationDao.seedForGame(gameId, boardGraph, seededShops)
 
-		// average(100, 101) = 100.5; 100.5 * 1.0 = 100.5, which rounds up to 101.
-		assertThat(seeded.single().currentStockValue).isEqualTo(101)
+		// average(1, 3) = 2; 2 * 0.2500 = 0.5, which rounds up to 1 under HALF_UP.
+		assertThat(seeded.single().currentStockValue).isEqualTo(1)
 	}
 
 	@Test

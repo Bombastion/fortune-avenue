@@ -8,9 +8,9 @@ private const val STOCK_PERCENTAGE_SCALE = 4
 
 /**
  * Validates a board creation request's districts: every district's colorHex must be exactly 6 hex
- * characters, every district's minimumStockPercentage must be a positive decimal no greater than
- * 1 with exactly 4 digits, and every space's districtIndex (if present) must reference a real
- * district.
+ * characters, every district's minimumStockPercentage must be a positive decimal strictly less
+ * than 1 with exactly 4 digits, and every space's districtIndex (if present) must reference a
+ * real district.
  */
 object DistrictValidator {
 
@@ -28,7 +28,7 @@ object DistrictValidator {
 				null
 			} else {
 				"District at index $index has minimumStockPercentage ${district.minimumStockPercentage}; it must be a positive " +
-					"decimal, no greater than 1, with exactly $STOCK_PERCENTAGE_SCALE digits."
+					"decimal strictly between 0 and 1, with exactly $STOCK_PERCENTAGE_SCALE digits."
 			}
 		}
 
@@ -46,5 +46,5 @@ object DistrictValidator {
 	}
 
 	private fun isValidStockPercentage(value: BigDecimal): Boolean =
-		value > BigDecimal.ZERO && value <= BigDecimal.ONE && value.scale() == STOCK_PERCENTAGE_SCALE
+		value > BigDecimal.ZERO && value < BigDecimal.ONE && value.scale() == STOCK_PERCENTAGE_SCALE
 }

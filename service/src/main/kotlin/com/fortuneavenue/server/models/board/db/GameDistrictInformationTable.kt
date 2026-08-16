@@ -3,9 +3,7 @@ package com.fortuneavenue.server.models.board.db
 import com.fortuneavenue.server.models.game.db.GamesTable
 import org.jetbrains.exposed.v1.core.dao.id.UuidTable
 
-// 5, not 4 -- same reasoning as DistrictsTable.minimumStockPercentage: this is allowed to
-// equal 1 exactly.
-private const val STOCK_PERCENTAGE_PRECISION = 5
+private const val STOCK_PERCENTAGE_PRECISION = 4
 private const val STOCK_PERCENTAGE_SCALE = 4
 
 /**

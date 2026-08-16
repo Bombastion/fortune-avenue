@@ -48,9 +48,9 @@ data class CreateDistrictProgressionRequest(
  *
  * [minimumStockPercentage] is the floor, as a fraction of the average value of the district's
  * SHOP spaces, that the district's stock can trade at once a game starts -- a positive decimal
- * with exactly 4 digits, no greater than 1 (e.g. 0.5000 means the stock can never trade below
- * half the district's average shop value). Copied onto game_district_information when a game
- * starts (see [com.fortuneavenue.server.dao.GameDistrictInformationDao.seedForGame]). See
+ * strictly between 0 and 1 with exactly 4 digits (e.g. 0.5000 means the stock can never trade
+ * below half the district's average shop value). Copied onto game_district_information when a
+ * game starts (see [com.fortuneavenue.server.dao.GameDistrictInformationDao.seedForGame]). See
  * [DistrictValidator].
  *
  * [progressions] defines how shop values in this district scale as a player accumulates more of

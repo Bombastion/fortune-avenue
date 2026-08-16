@@ -75,8 +75,8 @@ class DistrictValidatorTest {
 	}
 
 	@Test
-	fun `a minimumStockPercentage of exactly 1 is accepted`() {
-		val req = request(districts = listOf(CreateDistrictRequest("Red", "FF0000", BigDecimal("1.0000"))))
+	fun `a minimumStockPercentage just below 1 is accepted`() {
+		val req = request(districts = listOf(CreateDistrictRequest("Red", "FF0000", BigDecimal("0.9999"))))
 
 		assertThat(DistrictValidator.validate(req)).isEmpty()
 	}
@@ -92,13 +92,16 @@ class DistrictValidatorTest {
 	}
 
 	@Test
-	fun `a minimumStockPercentage greater than 1 is rejected`() {
-		val req = request(districts = listOf(CreateDistrictRequest("Red", "FF0000", BigDecimal("1.0001"))))
+	fun `a minimumStockPercentage of exactly 1, or greater than 1, is rejected`() {
+		val exactlyOne = request(districts = listOf(CreateDistrictRequest("Red", "FF0000", BigDecimal("1.0000"))))
+		val exactlyOneErrors = DistrictValidator.validate(exactlyOne)
+		assertThat(exactlyOneErrors).hasSize(1)
+		assertThat(exactlyOneErrors.single()).contains("index 0").contains("minimumStockPercentage")
 
-		val errors = DistrictValidator.validate(req)
-
-		assertThat(errors).hasSize(1)
-		assertThat(errors.single()).contains("index 0").contains("minimumStockPercentage")
+		val greaterThanOne = request(districts = listOf(CreateDistrictRequest("Red", "FF0000", BigDecimal("1.0001"))))
+		val greaterThanOneErrors = DistrictValidator.validate(greaterThanOne)
+		assertThat(greaterThanOneErrors).hasSize(1)
+		assertThat(greaterThanOneErrors.single()).contains("index 0").contains("minimumStockPercentage")
 	}
 
 	@Test
