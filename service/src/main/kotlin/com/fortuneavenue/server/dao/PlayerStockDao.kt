@@ -26,8 +26,7 @@ class PlayerStockDao {
 	/**
 	 * Adds [delta] (negative to sell) to [playerId]'s held quantity of [gameDistrictInformationId]'s
 	 * stock, creating the row (starting from 0) the first time this player trades that district's
-	 * stock. Callers are responsible for keeping the result non-negative (see
-	 * PlayerStocksTable) -- GameSimulationService never lets a sale exceed what's currently held.
+	 * stock
 	 */
 	fun adjustQuantity(playerId: Uuid, gameDistrictInformationId: Uuid, delta: Int): PlayerStock = transaction {
 		val existing = findEntity(playerId, gameDistrictInformationId)
