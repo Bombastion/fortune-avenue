@@ -39,7 +39,8 @@ curl -s -X POST http://localhost:8080/boards \
       { "spaceType": "HEART" },
       { "spaceType": "DIAMOND" },
       { "spaceType": "SPADE" },
-      { "spaceType": "CLUB" }
+      { "spaceType": "CLUB" },
+      { "spaceType": "BANK" }
     ],
     "paths": [
       { "from": 0, "to": 1, "branchOrder": 0 },
@@ -48,10 +49,13 @@ curl -s -X POST http://localhost:8080/boards \
       { "from": 3, "to": 4, "branchOrder": 0 },
       { "from": 4, "to": 5, "branchOrder": 0 },
       { "from": 5, "to": 6, "branchOrder": 0 },
-      { "from": 6, "to": 0, "branchOrder": 0 }
+      { "from": 6, "to": 7, "branchOrder": 0 },
+      { "from": 7, "to": 0, "branchOrder": 0 }
     ],
     "startSpaceIndex": 0,
     "startingGold": 1500,
+    "baseSalary": 300,
+    "promotionBonus": 100,
     "districts": [
       {
         "name": "Blue District",
@@ -87,6 +91,8 @@ A district's `progressions` describe how shop values there scale as a single pla
 A district's `minimumStockPercentage` is the floor, as a fraction of the average value of its SHOP spaces, that its stock can trade at once a game starts -- a positive decimal strictly between 0 and 1 with exactly 4 digits (e.g. `0.5000` means the stock can never trade below half the district's average shop value). When a game starts, this is copied onto a per-game `game_district_information` row along with the computed `currentStockValue` -- the average `currentValue` of the district's shops at that moment, multiplied by `minimumStockPercentage` -- for every district that actually contains at least one SHOP space.
 
 A board's `startingGold` is how much gold every player in a game on that board starts with -- it's copied onto each player's state the moment they're added to a game (see `POST /games/{gameId}/players` below).
+
+A board's `spaces` must include at least one BANK space and at least one of each suit (HEART, DIAMOND, SPADE, CLUB) -- a board missing any of these is rejected at creation, since a BANK space is what triggers a promotion payout, and that payout requires a player to be able to hold all 4 suits at once. `baseSalary` and `promotionBonus` are that payout's base amount and per-level bonus: a player who passes or lands on a BANK space while holding all 4 suits is paid `baseSalary + (promotionBonus * however many times they've already collected the promotion this game) + the current value of every shop they own`, then has their suits cleared and their promotion count bumped by one for next time. `baseSalary` must be a positive integer; `promotionBonus` must be zero or a positive integer.
 
 ### 2. Play the game over WebSocket
 
@@ -132,6 +138,14 @@ Every space a player passes or lands on is also a candidate for a suit pickup --
 ```
 
 Nothing is broadcast for a suit a player already holds -- picking one up again has no effect.
+
+The same space is also checked for a promotion -- a board can have a BANK space too, and passing or landing on one while currently holding all 4 suits clears them, bumps a promotion count, and pays out gold per the `baseSalary`/`promotionBonus` formula described above, broadcast right after that space's `player_moved` event:
+
+```json
+{"type":"promoted","playerId":"...","spaceId":"...","goldAwarded":600}
+```
+
+Nothing is broadcast for a BANK space visited without holding all 4 suits.
 
 If movement reaches a space with more than one path out of it, it pauses there instead of a `player_moved` broadcast, and lists the options:
 

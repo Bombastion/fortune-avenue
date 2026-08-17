@@ -573,9 +573,7 @@ class GameSimulationService(
 
 	/**
 	 * [spaceId] triggers a promotion for [playerId] if it's a BANK space (see [SpaceType]) and
-	 * they currently hold all 4 suits -- the completeness check, and the payout calculation
-	 * below, both live here rather than in PlayerDao, which only knows how to clear suits and
-	 * bump a promotion count, not why. The payout is board.baseSalary + (board.promotionBonus *
+	 * they currently hold all 4 suits. The payout is board.baseSalary + (board.promotionBonus *
 	 * their promotionCount so far, i.e. how many times they've already been promoted -- see
 	 * PlayerStatesTable) + the current value of every shop they own in [gameId] (see
 	 * GameShopInformationDao.findOwnedByPlayer), paid via [PlayerDao.adjustGold]. Their held

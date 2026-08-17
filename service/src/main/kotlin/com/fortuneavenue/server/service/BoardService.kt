@@ -23,6 +23,7 @@ class BoardService(
 		val errors = ShopSpaceValidator.validate(request.spaces) +
 			DistrictValidator.validate(request) +
 			DistrictProgressionValidator.validate(request) +
+			RequiredSpaceTypesValidator.validate(request.spaces) +
 			startingGoldErrors +
 			baseSalaryErrors +
 			promotionBonusErrors +

@@ -80,20 +80,13 @@ class PlayerDao {
 		}
 	}
 
-	/**
-	 * Clears [playerId]'s held suits entirely -- whether they actually held any is entirely the
-	 * caller's concern (see GameSimulationService, which only calls this once it's already
-	 * decided a BANK promotion happened). Returns the updated state, or null if the player has
-	 * no state at all.
-	 */
 	fun clearHeldSuits(playerId: Uuid): PlayerState? = transaction {
 		findStateEntity(playerId)?.apply { heldSuits = emptyList() }
 	}
 
 	/**
 	 * Adds 1 to [playerId]'s promotionCount -- see GameSimulationService, which drives this
-	 * every time a BANK promotion happens, after already having read the pre-increment value as
-	 * that promotion's "level" (see PlayerStatesTable.promotionCount). Returns the updated
+	 * every time a BANK promotion happens. Returns the updated
 	 * state, or null if the player has no state at all.
 	 */
 	fun incrementPromotionCount(playerId: Uuid): PlayerState? = transaction {

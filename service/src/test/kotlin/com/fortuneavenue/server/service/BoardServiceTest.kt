@@ -34,17 +34,30 @@ class BoardServiceTest {
 		boardService = BoardService(boardDao)
 	}
 
+	// Spaces 3-7 are the required BANK + one-of-each-suit spaces every board must have (see
+	// RequiredSpaceTypesValidator); every test below derives from this via .copy()/mapIndexed, so
+	// they inherit these automatically unless a test deliberately overrides them.
 	private fun validRequest() = CreateBoardRequest(
 		name = "Loop",
 		spaces = listOf(
 			CreateBoardSpaceRequest(SpaceType.BASIC),
 			CreateBoardSpaceRequest(SpaceType.BASIC),
 			CreateBoardSpaceRequest(SpaceType.BASIC),
+			CreateBoardSpaceRequest(SpaceType.BANK),
+			CreateBoardSpaceRequest(SpaceType.HEART),
+			CreateBoardSpaceRequest(SpaceType.DIAMOND),
+			CreateBoardSpaceRequest(SpaceType.SPADE),
+			CreateBoardSpaceRequest(SpaceType.CLUB),
 		),
 		paths = listOf(
 			CreateBoardPathRequest(0, 1),
 			CreateBoardPathRequest(1, 2),
-			CreateBoardPathRequest(2, 0),
+			CreateBoardPathRequest(2, 3),
+			CreateBoardPathRequest(3, 4),
+			CreateBoardPathRequest(4, 5),
+			CreateBoardPathRequest(5, 6),
+			CreateBoardPathRequest(6, 7),
+			CreateBoardPathRequest(7, 0),
 		),
 		startSpaceIndex = 0,
 		startingGold = 1000,
