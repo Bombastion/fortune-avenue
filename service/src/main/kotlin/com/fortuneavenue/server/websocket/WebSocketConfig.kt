@@ -7,12 +7,10 @@ import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry
 
 @Configuration
 @EnableWebSocket
-class WebSocketConfig(
-	private val gameWebSocketHandler: GameWebSocketHandler
-) : WebSocketConfigurer {
+class WebSocketConfig(private val gameWebSocketHandler: GameWebSocketHandler) :
+    WebSocketConfigurer {
 
-	override fun registerWebSocketHandlers(registry: WebSocketHandlerRegistry) {
-		registry.addHandler(gameWebSocketHandler, "/ws/game")
-			.setAllowedOrigins("*")
-	}
+    override fun registerWebSocketHandlers(registry: WebSocketHandlerRegistry) {
+        registry.addHandler(gameWebSocketHandler, "/ws/game").setAllowedOrigins("*")
+    }
 }

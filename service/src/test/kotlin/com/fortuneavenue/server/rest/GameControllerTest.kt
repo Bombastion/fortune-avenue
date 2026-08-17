@@ -9,6 +9,7 @@ import com.fortuneavenue.server.models.board.rest.CreateBoardSpaceRequest
 import com.fortuneavenue.server.models.common.rest.ErrorResponse
 import com.fortuneavenue.server.models.game.rest.CreateGameRequest
 import com.fortuneavenue.server.models.game.rest.GameResponse
+import kotlin.uuid.Uuid
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -18,105 +19,119 @@ import org.springframework.boot.test.web.client.TestRestTemplate
 import org.springframework.boot.test.web.client.getForEntity
 import org.springframework.boot.test.web.client.postForEntity
 import org.springframework.http.HttpStatus
-import kotlin.uuid.Uuid
 
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
 class GameControllerTest : DatabaseTest() {
 
-	@Autowired
-	lateinit var restTemplate: TestRestTemplate
+    @Autowired lateinit var restTemplate: TestRestTemplate
 
-	private fun createBoard(): BoardResponse = restTemplate.postForEntity<BoardResponse>(
-		"/boards",
-		CreateBoardRequest(
-			name = "loop-${Uuid.random()}",
-			// Spaces 3-7 are the required BANK + one-of-each-suit spaces every board must have (see
-			// RequiredSpaceTypesValidator) -- this board is only ever used to seed a game/player, so
-			// their exact positions don't matter here.
-			spaces = listOf(
-				CreateBoardSpaceRequest(SpaceType.BASIC),
-				CreateBoardSpaceRequest(SpaceType.BASIC),
-				CreateBoardSpaceRequest(SpaceType.BASIC),
-				CreateBoardSpaceRequest(SpaceType.BANK),
-				CreateBoardSpaceRequest(SpaceType.HEART),
-				CreateBoardSpaceRequest(SpaceType.DIAMOND),
-				CreateBoardSpaceRequest(SpaceType.SPADE),
-				CreateBoardSpaceRequest(SpaceType.CLUB),
-			),
-			paths = listOf(
-				CreateBoardPathRequest(0, 1),
-				CreateBoardPathRequest(1, 2),
-				CreateBoardPathRequest(2, 3),
-				CreateBoardPathRequest(3, 4),
-				CreateBoardPathRequest(4, 5),
-				CreateBoardPathRequest(5, 6),
-				CreateBoardPathRequest(6, 7),
-				CreateBoardPathRequest(7, 0),
-			),
-			startSpaceIndex = 0,
-			startingGold = 1000,
-			baseSalary = 200,
-			promotionBonus = 50,
-		),
-	).body!!
+    private fun createBoard(): BoardResponse =
+        restTemplate
+            .postForEntity<BoardResponse>(
+                "/boards",
+                CreateBoardRequest(
+                    name = "loop-${Uuid.random()}",
+                    // Spaces 3-7 are the required BANK + one-of-each-suit spaces every board must
+                    // have (see
+                    // RequiredSpaceTypesValidator) -- this board is only ever used to seed a
+                    // game/player, so
+                    // their exact positions don't matter here.
+                    spaces =
+                        listOf(
+                            CreateBoardSpaceRequest(SpaceType.BASIC),
+                            CreateBoardSpaceRequest(SpaceType.BASIC),
+                            CreateBoardSpaceRequest(SpaceType.BASIC),
+                            CreateBoardSpaceRequest(SpaceType.BANK),
+                            CreateBoardSpaceRequest(SpaceType.HEART),
+                            CreateBoardSpaceRequest(SpaceType.DIAMOND),
+                            CreateBoardSpaceRequest(SpaceType.SPADE),
+                            CreateBoardSpaceRequest(SpaceType.CLUB),
+                        ),
+                    paths =
+                        listOf(
+                            CreateBoardPathRequest(0, 1),
+                            CreateBoardPathRequest(1, 2),
+                            CreateBoardPathRequest(2, 3),
+                            CreateBoardPathRequest(3, 4),
+                            CreateBoardPathRequest(4, 5),
+                            CreateBoardPathRequest(5, 6),
+                            CreateBoardPathRequest(6, 7),
+                            CreateBoardPathRequest(7, 0),
+                        ),
+                    startSpaceIndex = 0,
+                    startingGold = 1000,
+                    baseSalary = 200,
+                    promotionBonus = 50,
+                ),
+            )
+            .body!!
 
-	@Test
-	fun `creating a game for a real board returns it as JSON`() {
-		val board = createBoard()
+    @Test
+    fun `creating a game for a real board returns it as JSON`() {
+        val board = createBoard()
 
-		val response = restTemplate.postForEntity<GameResponse>("/games", CreateGameRequest(boardId = board.id))
+        val response =
+            restTemplate.postForEntity<GameResponse>(
+                "/games",
+                CreateGameRequest(boardId = board.id),
+            )
 
-		assertThat(response.statusCode).isEqualTo(HttpStatus.CREATED)
-		val body = response.body
-		assertThat(body).isNotNull()
-		assertThat(body!!.boardId).isEqualTo(board.id)
-		assertThat(body.id).isNotBlank()
-	}
+        assertThat(response.statusCode).isEqualTo(HttpStatus.CREATED)
+        val body = response.body
+        assertThat(body).isNotNull()
+        assertThat(body!!.boardId).isEqualTo(board.id)
+        assertThat(body.id).isNotBlank()
+    }
 
-	@Test
-	fun `creating a game for a board that doesn't exist returns 400 with an explanatory message`() {
-		val response = restTemplate.postForEntity<ErrorResponse>(
-			"/games",
-			CreateGameRequest(boardId = Uuid.random().toString()),
-		)
+    @Test
+    fun `creating a game for a board that doesn't exist returns 400 with an explanatory message`() {
+        val response =
+            restTemplate.postForEntity<ErrorResponse>(
+                "/games",
+                CreateGameRequest(boardId = Uuid.random().toString()),
+            )
 
-		assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
-		assertThat(response.body?.message).isNotBlank()
-	}
+        assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
+        assertThat(response.body?.message).isNotBlank()
+    }
 
-	@Test
-	fun `creating a game with a malformed boardId returns 400 with an explanatory message`() {
-		val response = restTemplate.postForEntity<ErrorResponse>(
-			"/games",
-			CreateGameRequest(boardId = "not-a-uuid"),
-		)
+    @Test
+    fun `creating a game with a malformed boardId returns 400 with an explanatory message`() {
+        val response =
+            restTemplate.postForEntity<ErrorResponse>(
+                "/games",
+                CreateGameRequest(boardId = "not-a-uuid"),
+            )
 
-		assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
-		assertThat(response.body?.message).isNotBlank()
-	}
+        assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
+        assertThat(response.body?.message).isNotBlank()
+    }
 
-	@Test
-	fun `retrieving a game by id returns the same game as JSON`() {
-		val board = createBoard()
-		val created = restTemplate.postForEntity<GameResponse>("/games", CreateGameRequest(boardId = board.id)).body!!
+    @Test
+    fun `retrieving a game by id returns the same game as JSON`() {
+        val board = createBoard()
+        val created =
+            restTemplate
+                .postForEntity<GameResponse>("/games", CreateGameRequest(boardId = board.id))
+                .body!!
 
-		val response = restTemplate.getForEntity<GameResponse>("/games/${created.id}")
+        val response = restTemplate.getForEntity<GameResponse>("/games/${created.id}")
 
-		assertThat(response.statusCode).isEqualTo(HttpStatus.OK)
-		assertThat(response.body).isEqualTo(created)
-	}
+        assertThat(response.statusCode).isEqualTo(HttpStatus.OK)
+        assertThat(response.body).isEqualTo(created)
+    }
 
-	@Test
-	fun `retrieving an unknown game id returns 404`() {
-		val response = restTemplate.getForEntity<String>("/games/${Uuid.random()}")
+    @Test
+    fun `retrieving an unknown game id returns 404`() {
+        val response = restTemplate.getForEntity<String>("/games/${Uuid.random()}")
 
-		assertThat(response.statusCode).isEqualTo(HttpStatus.NOT_FOUND)
-	}
+        assertThat(response.statusCode).isEqualTo(HttpStatus.NOT_FOUND)
+    }
 
-	@Test
-	fun `retrieving a malformed game id returns 400`() {
-		val response = restTemplate.getForEntity<String>("/games/not-a-uuid")
+    @Test
+    fun `retrieving a malformed game id returns 400`() {
+        val response = restTemplate.getForEntity<String>("/games/not-a-uuid")
 
-		assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
-	}
+        assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
+    }
 }

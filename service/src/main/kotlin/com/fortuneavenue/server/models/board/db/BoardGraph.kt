@@ -1,13 +1,11 @@
 package com.fortuneavenue.server.models.board.db
 
-/**
- * A fully loaded board
- */
+/** A fully loaded board */
 data class BoardGraph(
-	val board: Board,
-	val spaces: List<BoardSpace>,
-	val paths: List<BoardPath>,
-	val shopInformation: List<ShopInformation> = emptyList(),
-	val districts: List<District> = emptyList(),
-	val districtProgressions: List<DistrictValueProgression> = emptyList(),
+    val board: Board,
+    val spaces: List<BoardSpace>,
+    val paths: List<BoardPath>,
+    val shopInformation: List<ShopInformation> = emptyList(),
+    val districts: List<District> = emptyList(),
+    val districtProgressions: List<DistrictValueProgression> = emptyList(),
 )
