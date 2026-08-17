@@ -50,9 +50,7 @@ interface ComputerPlayer {
 	/**
 	 * Decides whether the computer player wants to buy or sell stock at a BANK space it just
 	 * passed or landed on, given [offers] (one per district with stock available to trade -- see
-	 * GameDistrictInformationDao) and [currentGold]. Returns null to skip trading entirely. No
-	 * real policy exists yet -- always returns null (same "not implemented yet" placeholder as
-	 * computer opponents themselves) -- but GameSimulationService still enforces the same floors
+	 * GameDistrictInformationDao) and [currentGold]. GameSimulationService enforces the same floors
 	 * a human is held to regardless of what this says (can't buy more than currentGold covers,
 	 * can't sell more than currently held, quantity between 1 and 99), exactly like [shouldBuyShop].
 	 */
