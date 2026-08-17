@@ -87,6 +87,34 @@ data class DistrictValuesRecalculatedEvent(
 	override val type: String = "district_values_recalculated",
 ) : GameEvent
 
+/** One district's stock a player can buy or sell with a `buy_stock`/`sell_stock` message, naming its `districtId`. */
+data class StockTradeOfferPayload(val districtId: String, val pricePerShare: Int, val ownedQuantity: Int)
+
+data class StockTradingAvailableEvent(
+	val playerId: String,
+	val spaceId: String,
+	val offers: List<StockTradeOfferPayload>,
+	override val type: String = "stock_trading_available",
+) : GameEvent
+
+data class StockPurchasedEvent(
+	val playerId: String,
+	val districtId: String,
+	val quantity: Int,
+	val pricePerShare: Int,
+	val totalCost: Int,
+	override val type: String = "stock_purchased",
+) : GameEvent
+
+data class StockSoldEvent(
+	val playerId: String,
+	val districtId: String,
+	val quantity: Int,
+	val pricePerShare: Int,
+	val totalProceeds: Int,
+	override val type: String = "stock_sold",
+) : GameEvent
+
 data class TurnEndedEvent(
 	val turnNumber: Int,
 	val playerId: String,
