@@ -2,109 +2,112 @@ package com.fortuneavenue.server.dao
 
 import com.fortuneavenue.server.DatabaseTest
 import com.fortuneavenue.server.models.board.db.SpaceType
+import kotlin.uuid.Uuid
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
-import kotlin.uuid.Uuid
 
 @SpringBootTest
 class GameDaoTest : DatabaseTest() {
 
-	@Autowired
-	lateinit var gameDao: GameDao
+    @Autowired lateinit var gameDao: GameDao
 
-	@Autowired
-	lateinit var boardDao: BoardDao
+    @Autowired lateinit var boardDao: BoardDao
 
-	private fun createBoardId(): Uuid = boardDao.create(
-		name = "board-${Uuid.random()}",
-		spaceInputs = listOf(BoardDao.SpaceInput(SpaceType.BASIC)),
-		pathInputs = emptyList(),
-		startIndex = 0,
-	).board.id.value
+    private fun createBoardId(): Uuid =
+        boardDao
+            .create(
+                name = "board-${Uuid.random()}",
+                spaceInputs = listOf(BoardDao.SpaceInput(SpaceType.BASIC)),
+                pathInputs = emptyList(),
+                startIndex = 0,
+            )
+            .board
+            .id
+            .value
 
-	@Test
-	fun `create persists a game tied to a board, that can then be found by id`() {
-		val boardId = createBoardId()
+    @Test
+    fun `create persists a game tied to a board, that can then be found by id`() {
+        val boardId = createBoardId()
 
-		val created = gameDao.create(boardId)
-		val found = gameDao.findById(created.id.value)
+        val created = gameDao.create(boardId)
+        val found = gameDao.findById(created.id.value)
 
-		assertThat(found).isNotNull()
-		assertThat(found!!.id.value).isEqualTo(created.id.value)
-		assertThat(found.boardId.value).isEqualTo(boardId)
-	}
+        assertThat(found).isNotNull()
+        assertThat(found!!.id.value).isEqualTo(created.id.value)
+        assertThat(found.boardId.value).isEqualTo(boardId)
+    }
 
-	@Test
-	fun `create starts a game at turn zero, with no turn order yet, and a default max turns`() {
-		val created = gameDao.create(createBoardId())
+    @Test
+    fun `create starts a game at turn zero, with no turn order yet, and a default max turns`() {
+        val created = gameDao.create(createBoardId())
 
-		assertThat(created.turnNumber).isEqualTo(0)
-		assertThat(created.turnOrder).isNull()
-		assertThat(created.maxTurns).isEqualTo(10)
-		assertThat(created.currentMovementPoints).isNull()
-	}
+        assertThat(created.turnNumber).isEqualTo(0)
+        assertThat(created.turnOrder).isNull()
+        assertThat(created.maxTurns).isEqualTo(10)
+        assertThat(created.currentMovementPoints).isNull()
+    }
 
-	@Test
-	fun `setMovementPoints records remaining movement`() {
-		val game = gameDao.create(createBoardId())
+    @Test
+    fun `setMovementPoints records remaining movement`() {
+        val game = gameDao.create(createBoardId())
 
-		val updated = gameDao.setMovementPoints(game.id.value, 3)
+        val updated = gameDao.setMovementPoints(game.id.value, 3)
 
-		assertThat(updated).isNotNull()
-		assertThat(updated!!.currentMovementPoints).isEqualTo(3)
-		assertThat(gameDao.findById(game.id.value)!!.currentMovementPoints).isEqualTo(3)
-	}
+        assertThat(updated).isNotNull()
+        assertThat(updated!!.currentMovementPoints).isEqualTo(3)
+        assertThat(gameDao.findById(game.id.value)!!.currentMovementPoints).isEqualTo(3)
+    }
 
-	@Test
-	fun `setMovementPoints can clear remaining movement back to null`() {
-		val game = gameDao.create(createBoardId())
-		gameDao.setMovementPoints(game.id.value, 3)
+    @Test
+    fun `setMovementPoints can clear remaining movement back to null`() {
+        val game = gameDao.create(createBoardId())
+        gameDao.setMovementPoints(game.id.value, 3)
 
-		val updated = gameDao.setMovementPoints(game.id.value, null)
+        val updated = gameDao.setMovementPoints(game.id.value, null)
 
-		assertThat(updated!!.currentMovementPoints).isNull()
-	}
+        assertThat(updated!!.currentMovementPoints).isNull()
+    }
 
-	@Test
-	fun `startGame sets the turn order`() {
-		val game = gameDao.create(createBoardId())
-		val order = listOf(Uuid.random(), Uuid.random())
+    @Test
+    fun `startGame sets the turn order`() {
+        val game = gameDao.create(createBoardId())
+        val order = listOf(Uuid.random(), Uuid.random())
 
-		val started = gameDao.startGame(game.id.value, order)
+        val started = gameDao.startGame(game.id.value, order)
 
-		assertThat(started).isNotNull()
-		assertThat(started!!.turnOrder).isEqualTo(order)
-		assertThat(gameDao.findById(game.id.value)!!.turnOrder).isEqualTo(order)
-	}
+        assertThat(started).isNotNull()
+        assertThat(started!!.turnOrder).isEqualTo(order)
+        assertThat(gameDao.findById(game.id.value)!!.turnOrder).isEqualTo(order)
+    }
 
-	@Test
-	fun `advanceTurn increments the turn number`() {
-		val game = gameDao.create(createBoardId())
+    @Test
+    fun `advanceTurn increments the turn number`() {
+        val game = gameDao.create(createBoardId())
 
-		val advanced = gameDao.advanceTurn(game.id.value)
+        val advanced = gameDao.advanceTurn(game.id.value)
 
-		assertThat(advanced).isNotNull()
-		assertThat(advanced!!.turnNumber).isEqualTo(1)
-		assertThat(gameDao.findById(game.id.value)!!.turnNumber).isEqualTo(1)
-	}
+        assertThat(advanced).isNotNull()
+        assertThat(advanced!!.turnNumber).isEqualTo(1)
+        assertThat(gameDao.findById(game.id.value)!!.turnNumber).isEqualTo(1)
+    }
 
-	@Test
-	fun `advanceTurn clears any leftover movement points`() {
-		val game = gameDao.create(createBoardId())
-		gameDao.setMovementPoints(game.id.value, 2)
+    @Test
+    fun `advanceTurn clears any leftover movement points`() {
+        val game = gameDao.create(createBoardId())
+        gameDao.setMovementPoints(game.id.value, 2)
 
-		val advanced = gameDao.advanceTurn(game.id.value)
+        val advanced = gameDao.advanceTurn(game.id.value)
 
-		assertThat(advanced!!.currentMovementPoints).isNull()
-		assertThat(gameDao.findById(game.id.value)!!.currentMovementPoints).isNull()
-	}
+        assertThat(advanced!!.currentMovementPoints).isNull()
+        assertThat(gameDao.findById(game.id.value)!!.currentMovementPoints).isNull()
+    }
 
-	@Test
-	fun `findById returns null for an id that does not exist`() {
-		val result = gameDao.findById(Uuid.random())
+    @Test
+    fun `findById returns null for an id that does not exist`() {
+        val result = gameDao.findById(Uuid.random())
 
-		assertThat(result).isNull()
-	}
+        assertThat(result).isNull()
+    }
 }

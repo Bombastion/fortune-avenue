@@ -12,14 +12,13 @@ import org.springframework.http.HttpStatus
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
 class HealthControllerTest : DatabaseTest() {
 
-	@Autowired
-	lateinit var restTemplate: TestRestTemplate
+    @Autowired lateinit var restTemplate: TestRestTemplate
 
-	@Test
-	fun `health endpoint returns 200 with ok status`() {
-		val response = restTemplate.getForEntity("/health", Map::class.java)
+    @Test
+    fun `health endpoint returns 200 with ok status`() {
+        val response = restTemplate.getForEntity("/health", Map::class.java)
 
-		assertThat(response.statusCode).isEqualTo(HttpStatus.OK)
-		assertThat(response.body).isEqualTo(mapOf("status" to "ok"))
-	}
+        assertThat(response.statusCode).isEqualTo(HttpStatus.OK)
+        assertThat(response.body).isEqualTo(mapOf("status" to "ok"))
+    }
 }
