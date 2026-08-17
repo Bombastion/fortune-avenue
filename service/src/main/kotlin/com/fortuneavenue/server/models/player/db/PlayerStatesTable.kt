@@ -25,6 +25,11 @@ object PlayerStatesTable : UuidTable("player_states") {
 	// Card suits (SpaceType.HEART/DIAMOND/SPADE/CLUB, stored by name) this player has picked up
 	// by passing or landing on that type of space over the course of the game
 	val heldSuits = array<String>("held_suits", VarCharColumnType(SPACE_TYPE_LENGTH)).default(emptyList())
+
+	// How many times this player has collected the BANK promotion so far (see
+	// GameSimulationService) -- starts at 0, and is used as-is as the "level" in that payout's
+	// formula before being incremented for next time.
+	val promotionCount = integer("promotion_count").default(0)
 }
 
 private const val STATUS_LENGTH = 50

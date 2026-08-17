@@ -175,6 +175,64 @@ class PlayerDaoTest : DatabaseTest() {
 	}
 
 	@Test
+	fun `clearHeldSuits clears every held suit, unconditionally`() {
+		val player = playerDao.create(gameId = createGame().id.value)
+		playerDao.addHeldSuit(player.id.value, SpaceType.HEART)
+		playerDao.addHeldSuit(player.id.value, SpaceType.DIAMOND)
+
+		val cleared = playerDao.clearHeldSuits(player.id.value)
+
+		assertThat(cleared).isNotNull()
+		assertThat(cleared!!.heldSuits).isEmpty()
+		assertThat(playerDao.findState(player.id.value)!!.heldSuits).isEmpty()
+	}
+
+	@Test
+	fun `clearHeldSuits is a no-op, not an error, for a player already holding no suits`() {
+		val player = playerDao.create(gameId = createGame().id.value)
+
+		val cleared = playerDao.clearHeldSuits(player.id.value)
+
+		assertThat(cleared).isNotNull()
+		assertThat(playerDao.findState(player.id.value)!!.heldSuits).isEmpty()
+	}
+
+	@Test
+	fun `clearHeldSuits returns null for a player id that does not exist`() {
+		val result = playerDao.clearHeldSuits(Uuid.random())
+
+		assertThat(result).isNull()
+	}
+
+	@Test
+	fun `create also persists state with a promotionCount of 0`() {
+		val game = createGame()
+
+		val created = playerDao.create(gameId = game.id.value)
+
+		assertThat(playerDao.findState(created.id.value)!!.promotionCount).isEqualTo(0)
+	}
+
+	@Test
+	fun `incrementPromotionCount adds 1, and can be called repeatedly`() {
+		val player = playerDao.create(gameId = createGame().id.value)
+
+		val afterFirst = playerDao.incrementPromotionCount(player.id.value)
+		val afterSecond = playerDao.incrementPromotionCount(player.id.value)
+
+		assertThat(afterFirst?.promotionCount).isEqualTo(1)
+		assertThat(afterSecond?.promotionCount).isEqualTo(2)
+		assertThat(playerDao.findState(player.id.value)!!.promotionCount).isEqualTo(2)
+	}
+
+	@Test
+	fun `incrementPromotionCount returns null for a player id that does not exist`() {
+		val result = playerDao.incrementPromotionCount(Uuid.random())
+
+		assertThat(result).isNull()
+	}
+
+	@Test
 	fun `create persists a player with no user, for a future computer opponent`() {
 		val game = createGame()
 

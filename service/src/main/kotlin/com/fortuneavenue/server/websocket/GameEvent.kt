@@ -43,6 +43,18 @@ data class SuitPickedUpEvent(
 	override val type: String = "suit_picked_up",
 ) : GameEvent
 
+/**
+ * [playerId] was promoted at [spaceId] (a BANK space) after passing or landing on it while
+ * holding all 4 suits -- their held suits have been cleared, their promotion count went up by
+ * one, and they were paid [goldAwarded] gold.
+ */
+data class PromotedEvent(
+	val playerId: String,
+	val spaceId: String,
+	val goldAwarded: Int,
+	override val type: String = "promoted",
+) : GameEvent
+
 /** One outgoing path a player can pick with a `choose_path` message. */
 data class PathOptionPayload(val toSpaceId: String, val branchOrder: Int)
 

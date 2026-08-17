@@ -7,4 +7,5 @@ enum class SpaceType {
 	DIAMOND,
 	SPADE,
 	CLUB,
+	BANK,
 }

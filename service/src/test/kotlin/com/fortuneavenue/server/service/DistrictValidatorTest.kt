@@ -20,6 +20,8 @@ class DistrictValidatorTest {
 		paths = listOf(CreateBoardPathRequest(0, 0)),
 		startSpaceIndex = 0,
 		startingGold = 1000,
+		baseSalary = 200,
+		promotionBonus = 50,
 		districts = districts,
 	)
 

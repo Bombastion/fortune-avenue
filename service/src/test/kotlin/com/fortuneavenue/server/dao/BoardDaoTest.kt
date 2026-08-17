@@ -68,6 +68,27 @@ class BoardDaoTest : DatabaseTest() {
 	}
 
 	@Test
+	fun `create persists baseSalary and promotionBonus, and findById returns them`() {
+		val created = boardDao.create(
+			name = "promotion-board-${Uuid.random()}",
+			spaceInputs = listOf(BoardDao.SpaceInput(SpaceType.BASIC)),
+			pathInputs = emptyList(),
+			startIndex = 0,
+			baseSalary = 300,
+			promotionBonus = 75,
+		)
+
+		assertThat(created.board.baseSalary).isEqualTo(300)
+		assertThat(created.board.promotionBonus).isEqualTo(75)
+
+		val found = boardDao.findById(created.board.id.value)
+
+		assertThat(found).isNotNull()
+		assertThat(found!!.board.baseSalary).isEqualTo(300)
+		assertThat(found.board.promotionBonus).isEqualTo(75)
+	}
+
+	@Test
 	fun `create persists shop information for SHOP spaces only, and findById returns it`() {
 		val spaces = listOf(
 			BoardDao.SpaceInput(SpaceType.BASIC),

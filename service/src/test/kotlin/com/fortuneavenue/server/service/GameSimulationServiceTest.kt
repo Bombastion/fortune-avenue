@@ -80,12 +80,25 @@ class GameSimulationServiceTest {
 		return player
 	}
 
-	/** [currentGold] defaults generously high so existing tests don't have to think about affordability unless they're actually testing it. */
-	private fun mockPlayerState(status: PlayerStatus, currentSpaceId: Uuid? = null, currentGold: Int = 1000): PlayerState {
+	/**
+	 * [currentGold] defaults generously high so existing tests don't have to think about
+	 * affordability unless they're actually testing it. [heldSuits] and [promotionCount] default
+	 * to holding nothing and never having been promoted, so existing tests don't have to think
+	 * about BANK promotions unless they're actually testing those.
+	 */
+	private fun mockPlayerState(
+		status: PlayerStatus,
+		currentSpaceId: Uuid? = null,
+		currentGold: Int = 1000,
+		heldSuits: List<String> = emptyList(),
+		promotionCount: Int = 0,
+	): PlayerState {
 		val state = mock(PlayerState::class.java)
 		lenient().`when`(state.status).thenReturn(status)
 		lenient().`when`(state.currentSpaceId).thenReturn(currentSpaceId?.let { EntityID(it, BoardSpacesTable) })
 		lenient().`when`(state.currentGold).thenReturn(currentGold)
+		lenient().`when`(state.heldSuits).thenReturn(heldSuits)
+		lenient().`when`(state.promotionCount).thenReturn(promotionCount)
 		return state
 	}
 
@@ -104,9 +117,12 @@ class GameSimulationServiceTest {
 		return space
 	}
 
-	private fun mockBoard(startSpaceId: Uuid? = null): Board {
+	/** [baseSalary] and [promotionBonus] default to arbitrary positive values -- only the promotion tests below care what they actually are. */
+	private fun mockBoard(startSpaceId: Uuid? = null, baseSalary: Int = 200, promotionBonus: Int = 50): Board {
 		val board = mock(Board::class.java)
 		lenient().`when`(board.startSpaceId).thenReturn(startSpaceId)
+		lenient().`when`(board.baseSalary).thenReturn(baseSalary)
+		lenient().`when`(board.promotionBonus).thenReturn(promotionBonus)
 		return board
 	}
 
@@ -831,6 +847,172 @@ class GameSimulationServiceTest {
 		val result = service.rollDice(gameId, playerId)
 
 		assertThat(result.getOrNull()?.filterIsInstance<GameSimulationService.TurnEvent.SuitPickedUp>()).isEmpty()
+	}
+
+	// --- promotions ---
+
+	private val allSuitNames = listOf(SpaceType.HEART, SpaceType.DIAMOND, SpaceType.SPADE, SpaceType.CLUB).map { it.name }
+
+	@Test
+	fun `rollDice landing on a BANK space while holding all 4 suits triggers a promotion, paying baseSalary plus owned shop value on the first promotion`() {
+		val playerId = Uuid.random()
+		val startSpaceId = Uuid.random()
+		val nextSpaceId = Uuid.random()
+		val game = mockGame(turnOrder = listOf(playerId), turnNumber = 0, maxTurns = 10)
+		val player = mockPlayer(playerId)
+		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = null, heldSuits = allSuitNames, promotionCount = 0)
+		val board = mockBoard(startSpaceId = startSpaceId, baseSalary = 200, promotionBonus = 50)
+		val path = mockPath(from = startSpaceId, to = nextSpaceId, branchOrder = 0)
+		val space = mockSpace(nextSpaceId, SpaceType.BANK)
+		val boardGraph = BoardGraph(board = board, spaces = listOf(space), paths = listOf(path))
+		val advancedGame = mockGame(turnOrder = listOf(playerId), turnNumber = 1, maxTurns = 10)
+		val ownedShops = listOf(mockShop(Uuid.random(), currentValue = 150), mockShop(Uuid.random(), currentValue = 100))
+		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
+		given(playerDao.findState(playerId)).willReturn(playerState)
+		given(boardDao.findById(boardId)).willReturn(boardGraph)
+		given(dice.roll()).willReturn(1)
+		given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
+		given(gameShopInformationDao.findOwnedByPlayer(gameId, playerId)).willReturn(ownedShops)
+
+		val result = service.rollDice(gameId, playerId)
+
+		// 200 (baseSalary) + 50 * 0 (promotionBonus * promotionCount, still 0 the first time) + 250 (owned shops)
+		val events = result.getOrNull()
+		assertThat(events).containsExactly(
+			GameSimulationService.TurnEvent.DiceRolled(playerId, 1),
+			GameSimulationService.TurnEvent.Moved(playerId, 0, startSpaceId, nextSpaceId, 0),
+			GameSimulationService.TurnEvent.Promoted(playerId, nextSpaceId, 450),
+			GameSimulationService.TurnEvent.TurnEnded(playerId, 0, gameOver = false),
+			GameSimulationService.TurnEvent.TurnStarted(playerId, 1),
+		)
+		verify(playerDao).clearHeldSuits(playerId)
+		verify(playerDao).incrementPromotionCount(playerId)
+		verify(playerDao).adjustGold(playerId, 450)
+	}
+
+	@Test
+	fun `the promotion payout multiplies promotionBonus by however many times the player's already been promoted`() {
+		val playerId = Uuid.random()
+		val startSpaceId = Uuid.random()
+		val nextSpaceId = Uuid.random()
+		val game = mockGame(turnOrder = listOf(playerId), turnNumber = 0, maxTurns = 10)
+		val player = mockPlayer(playerId)
+		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = null, heldSuits = allSuitNames, promotionCount = 3)
+		val board = mockBoard(startSpaceId = startSpaceId, baseSalary = 200, promotionBonus = 50)
+		val path = mockPath(from = startSpaceId, to = nextSpaceId, branchOrder = 0)
+		val space = mockSpace(nextSpaceId, SpaceType.BANK)
+		val boardGraph = BoardGraph(board = board, spaces = listOf(space), paths = listOf(path))
+		val advancedGame = mockGame(turnOrder = listOf(playerId), turnNumber = 1, maxTurns = 10)
+		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
+		given(playerDao.findState(playerId)).willReturn(playerState)
+		given(boardDao.findById(boardId)).willReturn(boardGraph)
+		given(dice.roll()).willReturn(1)
+		given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
+		given(gameShopInformationDao.findOwnedByPlayer(gameId, playerId)).willReturn(emptyList())
+
+		val result = service.rollDice(gameId, playerId)
+
+		// 200 (baseSalary) + 50 * 3 (promotionBonus * promotionCount) + 0 (no owned shops) = 350
+		val promoted = result.getOrNull()?.filterIsInstance<GameSimulationService.TurnEvent.Promoted>()?.single()
+		assertThat(promoted?.goldAwarded).isEqualTo(350)
+		verify(playerDao).adjustGold(playerId, 350)
+	}
+
+	@Test
+	fun `rollDice passing through a BANK space mid-move while holding all 4 suits also triggers a promotion`() {
+		val playerId = Uuid.random()
+		val spaceA = Uuid.random()
+		val spaceB = Uuid.random()
+		val spaceC = Uuid.random()
+		val game = mockGame(turnOrder = listOf(playerId))
+		val player = mockPlayer(playerId)
+		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceA, heldSuits = allSuitNames)
+		val board = mockBoard()
+		val passedSpace = mockSpace(spaceB, SpaceType.BANK)
+		val boardGraph = BoardGraph(
+			board = board,
+			spaces = listOf(passedSpace),
+			paths = listOf(mockPath(spaceA, spaceB, 0), mockPath(spaceB, spaceC, 0)),
+		)
+		val advancedGame = mockGame(turnOrder = listOf(playerId), turnNumber = 1)
+		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
+		given(playerDao.findState(playerId)).willReturn(playerState)
+		given(boardDao.findById(boardId)).willReturn(boardGraph)
+		given(dice.roll()).willReturn(2)
+		given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
+		given(gameShopInformationDao.findOwnedByPlayer(gameId, playerId)).willReturn(emptyList())
+
+		val result = service.rollDice(gameId, playerId)
+
+		val events = result.getOrNull()
+		assertThat(events).anyMatch { it is GameSimulationService.TurnEvent.Promoted && it.spaceId == spaceB }
+		verify(playerDao).clearHeldSuits(playerId)
+		verify(playerDao).incrementPromotionCount(playerId)
+	}
+
+	@Test
+	fun `rollDice landing on a BANK space without all 4 suits emits no Promoted event, and leaves suits, promotion count, and gold untouched`() {
+		val playerId = Uuid.random()
+		val startSpaceId = Uuid.random()
+		val nextSpaceId = Uuid.random()
+		val game = mockGame(turnOrder = listOf(playerId), turnNumber = 0, maxTurns = 10)
+		val player = mockPlayer(playerId)
+		// Missing CLUB -- not a complete set.
+		val incompleteSuits = listOf(SpaceType.HEART, SpaceType.DIAMOND, SpaceType.SPADE).map { it.name }
+		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = null, heldSuits = incompleteSuits)
+		val board = mockBoard(startSpaceId = startSpaceId)
+		val path = mockPath(from = startSpaceId, to = nextSpaceId, branchOrder = 0)
+		val space = mockSpace(nextSpaceId, SpaceType.BANK)
+		val boardGraph = BoardGraph(board = board, spaces = listOf(space), paths = listOf(path))
+		val advancedGame = mockGame(turnOrder = listOf(playerId), turnNumber = 1, maxTurns = 10)
+		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
+		given(playerDao.findState(playerId)).willReturn(playerState)
+		given(boardDao.findById(boardId)).willReturn(boardGraph)
+		given(dice.roll()).willReturn(1)
+		given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
+
+		val result = service.rollDice(gameId, playerId)
+
+		val events = result.getOrNull()
+		assertThat(events).containsExactly(
+			GameSimulationService.TurnEvent.DiceRolled(playerId, 1),
+			GameSimulationService.TurnEvent.Moved(playerId, 0, startSpaceId, nextSpaceId, 0),
+			GameSimulationService.TurnEvent.TurnEnded(playerId, 0, gameOver = false),
+			GameSimulationService.TurnEvent.TurnStarted(playerId, 1),
+		)
+		verify(playerDao, never()).clearHeldSuits(playerId)
+		verify(playerDao, never()).incrementPromotionCount(playerId)
+		verify(gameShopInformationDao, never()).findOwnedByPlayer(gameId, playerId)
+	}
+
+	@Test
+	fun `rollDice landing on a non-BANK space never calls clearHeldSuits`() {
+		val playerId = Uuid.random()
+		val startSpaceId = Uuid.random()
+		val nextSpaceId = Uuid.random()
+		val game = mockGame(turnOrder = listOf(playerId), turnNumber = 0, maxTurns = 10)
+		val player = mockPlayer(playerId)
+		val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = null, heldSuits = allSuitNames)
+		val board = mockBoard(startSpaceId = startSpaceId)
+		val path = mockPath(from = startSpaceId, to = nextSpaceId, branchOrder = 0)
+		val space = mockSpace(nextSpaceId, SpaceType.BASIC)
+		val boardGraph = BoardGraph(board = board, spaces = listOf(space), paths = listOf(path))
+		val advancedGame = mockGame(turnOrder = listOf(playerId), turnNumber = 1, maxTurns = 10)
+		given(gameDao.findById(gameId)).willReturn(game)
+		given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
+		given(playerDao.findState(playerId)).willReturn(playerState)
+		given(boardDao.findById(boardId)).willReturn(boardGraph)
+		given(dice.roll()).willReturn(1)
+		given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
+
+		service.rollDice(gameId, playerId)
+
+		verify(playerDao, never()).clearHeldSuits(playerId)
+		verify(playerDao, never()).incrementPromotionCount(playerId)
 	}
 
 	// --- choosePath ---

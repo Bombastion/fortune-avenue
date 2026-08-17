@@ -50,6 +50,14 @@ import kotlin.uuid.Uuid
  * landing on or passing one picks it up for that player (see PlayerDao.addHeldSuit), announced
  * with a [TurnEvent.SuitPickedUp] the first time, and silently ignored every time after.
  *
+ * The same is true of a BANK space, but the other direction: passing or landing on one while
+ * currently holding all 4 suits triggers a promotion (see [checkPromotion]) -- their held suits
+ * are cleared (see PlayerDao.clearHeldSuits), their promotion count goes up by one for next time
+ * (see PlayerDao.incrementPromotionCount), and they're paid out board.baseSalary +
+ * (board.promotionBonus * however many times they'd already been promoted this game) + the
+ * current value of every shop they own, announced with a [TurnEvent.Promoted]. A BANK space is
+ * otherwise a no-op -- nothing happens visiting one without every suit in hand.
+ *
  * A player with no [com.fortuneavenue.server.models.player.db.Player.userId]
  * is a computer opponent -- there's nobody connected who could ready it up
  * or take its turns, so this service does that on its behalf: computer
@@ -111,6 +119,19 @@ class GameSimulationService(
 			override val playerId: Uuid,
 			val spaceId: Uuid,
 			val suit: SpaceType,
+		) : TurnEvent
+
+		/**
+		 * [playerId] passed or landed on [spaceId], a BANK space, while holding all 4 suits
+		 * (HEART/DIAMOND/SPADE/CLUB) -- triggering a promotion: their held suits are cleared,
+		 * their promotion count goes up by one for next time, and they're paid [goldAwarded]
+		 * gold (see [checkPromotion] for the payout formula). Not emitted for a BANK space
+		 * visited without every suit already held.
+		 */
+		data class Promoted(
+			override val playerId: Uuid,
+			val spaceId: Uuid,
+			val goldAwarded: Int,
 		) : TurnEvent
 
 		/** Movement is paused on [spaceId] until [choosePath] is called with one of [options]. */
@@ -281,7 +302,7 @@ class GameSimulationService(
 			?: return Result.failure(InvalidTurnException("$toSpaceId isn't a path out of player $playerId's current space."))
 
 		val movementPointsRemaining = remaining - 1
-		val events = applyMove(playerId, game.turnNumber, currentSpaceId, chosenPath, movementPointsRemaining, boardGraph).toMutableList()
+		val events = applyMove(gameId, playerId, game.turnNumber, currentSpaceId, chosenPath, movementPointsRemaining, boardGraph).toMutableList()
 		val movement = advanceMovement(
 			gameId,
 			playerId,
@@ -423,7 +444,7 @@ class GameSimulationService(
 
 			val chosenPath = if (outgoing.size > 1) computerPlayer.chooseBranch(outgoing) else outgoing.single()
 			remaining -= 1
-			events += applyMove(playerId, game.turnNumber, currentSpaceId, chosenPath, remaining, boardGraph)
+			events += applyMove(gameId, playerId, game.turnNumber, currentSpaceId, chosenPath, remaining, boardGraph)
 			currentSpaceId = chosenPath.toSpaceId.value
 		}
 
@@ -516,11 +537,13 @@ class GameSimulationService(
 	/**
 	 * Moves [playerId] onto [path]'s destination and returns the resulting events -- always a
 	 * leading [TurnEvent.Moved], plus a [TurnEvent.SuitPickedUp] if that destination is a suit
-	 * space and picking it up was actually new (see [pickUpSuit]). Every space a player is moved
-	 * onto over the course of a turn -- passed through mid-move or landed on at the end --
-	 * flows through here exactly once
+	 * space and picking it up was actually new (see [pickUpSuit]), plus a [TurnEvent.Promoted] if
+	 * it's a BANK space reached while holding all 4 suits (see [checkPromotion]). Every space a
+	 * player is moved onto over the course of a turn -- passed through mid-move or landed on at
+	 * the end -- flows through here exactly once
 	 */
 	private fun applyMove(
+		gameId: Uuid,
 		playerId: Uuid,
 		turnNumber: Int,
 		fromSpaceId: Uuid,
@@ -530,7 +553,9 @@ class GameSimulationService(
 	): List<TurnEvent> {
 		playerDao.updatePosition(playerId, path.toSpaceId.value)
 		val moved = TurnEvent.Moved(playerId, turnNumber, fromSpaceId, path.toSpaceId.value, movementPointsRemaining)
-		return listOf(moved) + pickUpSuit(playerId, path.toSpaceId.value, boardGraph)
+		return listOf(moved) +
+			pickUpSuit(playerId, path.toSpaceId.value, boardGraph) +
+			checkPromotion(gameId, playerId, path.toSpaceId.value, boardGraph)
 	}
 
 	/**
@@ -544,6 +569,32 @@ class GameSimulationService(
 		val pickedUp = playerDao.addHeldSuit(playerId, suit) ?: return emptyList()
 
 		return if (pickedUp) listOf(TurnEvent.SuitPickedUp(playerId, spaceId, suit)) else emptyList()
+	}
+
+	/**
+	 * [spaceId] triggers a promotion for [playerId] if it's a BANK space (see [SpaceType]) and
+	 * they currently hold all 4 suits. The payout is board.baseSalary + (board.promotionBonus *
+	 * their promotionCount so far, i.e. how many times they've already been promoted -- see
+	 * PlayerStatesTable) + the current value of every shop they own in [gameId] (see
+	 * GameShopInformationDao.findOwnedByPlayer), paid via [PlayerDao.adjustGold]. Their held
+	 * suits are then cleared (see [PlayerDao.clearHeldSuits]) and their promotion count bumped
+	 * for next time (see [PlayerDao.incrementPromotionCount]). A no-op, emitting nothing, for any
+	 * other space type or a player who doesn't hold every suit yet.
+	 */
+	private fun checkPromotion(gameId: Uuid, playerId: Uuid, spaceId: Uuid, boardGraph: BoardGraph): List<TurnEvent> {
+		boardGraph.spaces.find { it.id.value == spaceId }?.spaceType?.takeIf { it == SpaceType.BANK }
+			?: return emptyList()
+		val state = playerDao.findState(playerId) ?: return emptyList()
+		if (!SUIT_SPACE_TYPES.all { it.name in state.heldSuits }) return emptyList()
+
+		val ownedShopValue = gameShopInformationDao.findOwnedByPlayer(gameId, playerId).sumOf { it.currentValue }
+		val goldAwarded = boardGraph.board.baseSalary + (boardGraph.board.promotionBonus * state.promotionCount) + ownedShopValue
+
+		playerDao.clearHeldSuits(playerId)
+		playerDao.incrementPromotionCount(playerId)
+		playerDao.adjustGold(playerId, goldAwarded)
+
+		return listOf(TurnEvent.Promoted(playerId, spaceId, goldAwarded))
 	}
 
 	/** Only chains into the next player(s) once [movement] actually ended the turn rather than pausing on a choice. */

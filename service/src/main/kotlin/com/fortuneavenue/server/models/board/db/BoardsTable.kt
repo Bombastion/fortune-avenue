@@ -14,4 +14,10 @@ object BoardsTable : UuidTable("boards") {
 
 	// How much gold every player starts a game on this board with -- see player_states.current_gold.
 	val startingGold = integer("starting_gold")
+
+	// The B and P terms of the BANK promotion payout formula (see GameSimulationService):
+	// base_salary + (promotion_bonus * a player's promotion count so far) + the value of every
+	// shop they own.
+	val baseSalary = integer("base_salary")
+	val promotionBonus = integer("promotion_bonus")
 }

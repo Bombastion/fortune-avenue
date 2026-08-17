@@ -30,6 +30,13 @@ import kotlin.uuid.Uuid
 // about gold at all don't have to invent a number.
 private const val DEFAULT_STARTING_GOLD = 1000
 
+// Real base salary/promotion bonus amounts are always caller-supplied (CreateBoardRequest
+// requires both, and BoardService validates them -- see the BANK promotion payout formula on
+// GameSimulationService) -- these only exist so DAO-level tests that don't care about either
+// don't have to invent numbers.
+private const val DEFAULT_BASE_SALARY = 200
+private const val DEFAULT_PROMOTION_BONUS = 50
+
 @Repository
 class BoardDao {
 
@@ -55,6 +62,8 @@ class BoardDao {
 		startIndex: Int,
 		districtInputs: List<DistrictInput> = emptyList(),
 		startingGold: Int = DEFAULT_STARTING_GOLD,
+		baseSalary: Int = DEFAULT_BASE_SALARY,
+		promotionBonus: Int = DEFAULT_PROMOTION_BONUS,
 	): BoardGraph = transaction {
 		// start_space_id is a plain uuid column, not a typed reference() (see the
 		// comment on BoardsTable), but Board requires it to exist. We do some
@@ -63,8 +72,11 @@ class BoardDao {
 		val board = Board.new {
 			this.name = name
 			// `this.` is required here too -- create()'s own `startingGold` parameter
-			// would otherwise shadow the entity's `startingGold` property.
+			// would otherwise shadow the entity's `startingGold` property (same reasoning
+			// applies to baseSalary/promotionBonus below).
 			this.startingGold = startingGold
+			this.baseSalary = baseSalary
+			this.promotionBonus = promotionBonus
 		}
 		board.flush()
 

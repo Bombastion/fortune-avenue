@@ -80,6 +80,19 @@ class PlayerDao {
 		}
 	}
 
+	fun clearHeldSuits(playerId: Uuid): PlayerState? = transaction {
+		findStateEntity(playerId)?.apply { heldSuits = emptyList() }
+	}
+
+	/**
+	 * Adds 1 to [playerId]'s promotionCount -- see GameSimulationService, which drives this
+	 * every time a BANK promotion happens. Returns the updated
+	 * state, or null if the player has no state at all.
+	 */
+	fun incrementPromotionCount(playerId: Uuid): PlayerState? = transaction {
+		findStateEntity(playerId)?.apply { promotionCount += 1 }
+	}
+
 	// Not itself wrapped in a transaction -- only ever called from within one
 	// of the transaction {} blocks above.
 	private fun findStateEntity(playerId: Uuid): PlayerState? =

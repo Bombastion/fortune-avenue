@@ -142,18 +142,33 @@ class GameWebSocketHandlerTest : DatabaseTest() {
 		"/boards",
 		CreateBoardRequest(
 			name = "loop-${Uuid.random()}",
+			// Spaces 3-7 are the required BANK + one-of-each-suit spaces every board must have (see
+			// RequiredSpaceTypesValidator) -- appended after the plain BASIC loop this test actually
+			// exercises so they don't change anything about it (no branches either way).
 			spaces = listOf(
 				CreateBoardSpaceRequest(SpaceType.BASIC),
 				CreateBoardSpaceRequest(SpaceType.BASIC),
 				CreateBoardSpaceRequest(SpaceType.BASIC),
+				CreateBoardSpaceRequest(SpaceType.BANK),
+				CreateBoardSpaceRequest(SpaceType.HEART),
+				CreateBoardSpaceRequest(SpaceType.DIAMOND),
+				CreateBoardSpaceRequest(SpaceType.SPADE),
+				CreateBoardSpaceRequest(SpaceType.CLUB),
 			),
 			paths = listOf(
 				CreateBoardPathRequest(0, 1),
 				CreateBoardPathRequest(1, 2),
-				CreateBoardPathRequest(2, 0),
+				CreateBoardPathRequest(2, 3),
+				CreateBoardPathRequest(3, 4),
+				CreateBoardPathRequest(4, 5),
+				CreateBoardPathRequest(5, 6),
+				CreateBoardPathRequest(6, 7),
+				CreateBoardPathRequest(7, 0),
 			),
 			startSpaceIndex = 0,
 			startingGold = 1000,
+			baseSalary = 200,
+			promotionBonus = 50,
 		),
 	).body!!
 
@@ -166,19 +181,35 @@ class GameWebSocketHandlerTest : DatabaseTest() {
 		"/boards",
 		CreateBoardRequest(
 			name = "branch-${Uuid.random()}",
+			// Spaces 3-7 are the required BANK + one-of-each-suit spaces every board must have (see
+			// RequiredSpaceTypesValidator) -- strung along space 1's return leg back to the start
+			// instead of a direct 1 -> 0 edge, so the fork at space 0 still has exactly the 2 options
+			// (to 1, to 2) this test actually exercises.
 			spaces = listOf(
 				CreateBoardSpaceRequest(SpaceType.BASIC),
 				CreateBoardSpaceRequest(SpaceType.BASIC),
 				CreateBoardSpaceRequest(SpaceType.BASIC),
+				CreateBoardSpaceRequest(SpaceType.BANK),
+				CreateBoardSpaceRequest(SpaceType.HEART),
+				CreateBoardSpaceRequest(SpaceType.DIAMOND),
+				CreateBoardSpaceRequest(SpaceType.SPADE),
+				CreateBoardSpaceRequest(SpaceType.CLUB),
 			),
 			paths = listOf(
 				CreateBoardPathRequest(0, 1, branchOrder = 0),
 				CreateBoardPathRequest(0, 2, branchOrder = 1),
-				CreateBoardPathRequest(1, 0),
+				CreateBoardPathRequest(1, 3),
+				CreateBoardPathRequest(3, 4),
+				CreateBoardPathRequest(4, 5),
+				CreateBoardPathRequest(5, 6),
+				CreateBoardPathRequest(6, 7),
+				CreateBoardPathRequest(7, 0),
 				CreateBoardPathRequest(2, 0),
 			),
 			startSpaceIndex = 0,
 			startingGold = 1000,
+			baseSalary = 200,
+			promotionBonus = 50,
 		),
 	).body!!
 
@@ -207,16 +238,31 @@ class GameWebSocketHandlerTest : DatabaseTest() {
 		"/boards",
 		CreateBoardRequest(
 			name = "shop-${Uuid.random()}",
+			// Spaces 2-6 are the required BANK + one-of-each-suit spaces every board must have (see
+			// RequiredSpaceTypesValidator) -- strung along the shop's return leg back to the start so
+			// a roll of 1 from space 0 still lands directly on the SHOP at space 1, as this test relies on.
 			spaces = listOf(
 				CreateBoardSpaceRequest(SpaceType.BASIC),
 				CreateBoardSpaceRequest(SpaceType.SHOP, baseValue = baseValue, basePricePercentage = BigDecimal("0.2500")),
+				CreateBoardSpaceRequest(SpaceType.BANK),
+				CreateBoardSpaceRequest(SpaceType.HEART),
+				CreateBoardSpaceRequest(SpaceType.DIAMOND),
+				CreateBoardSpaceRequest(SpaceType.SPADE),
+				CreateBoardSpaceRequest(SpaceType.CLUB),
 			),
 			paths = listOf(
 				CreateBoardPathRequest(0, 1),
-				CreateBoardPathRequest(1, 0),
+				CreateBoardPathRequest(1, 2),
+				CreateBoardPathRequest(2, 3),
+				CreateBoardPathRequest(3, 4),
+				CreateBoardPathRequest(4, 5),
+				CreateBoardPathRequest(5, 6),
+				CreateBoardPathRequest(6, 0),
 			),
 			startSpaceIndex = 0,
 			startingGold = startingGold,
+			baseSalary = 200,
+			promotionBonus = 50,
 		),
 	).body!!
 
@@ -231,18 +277,33 @@ class GameWebSocketHandlerTest : DatabaseTest() {
 		"/boards",
 		CreateBoardRequest(
 			name = "district-shop-${Uuid.random()}",
+			// Spaces 3-7 are the required BANK + one-of-each-suit spaces every board must have (see
+			// RequiredSpaceTypesValidator) -- strung along the second shop's return leg back to the
+			// start so the two rolls of 1 this test relies on still land on space 1 then space 2.
 			spaces = listOf(
 				CreateBoardSpaceRequest(SpaceType.BASIC),
 				CreateBoardSpaceRequest(SpaceType.SHOP, baseValue = 100, basePricePercentage = BigDecimal("0.2500"), districtIndex = 0),
 				CreateBoardSpaceRequest(SpaceType.SHOP, baseValue = 200, basePricePercentage = BigDecimal("0.2500"), districtIndex = 0),
+				CreateBoardSpaceRequest(SpaceType.BANK),
+				CreateBoardSpaceRequest(SpaceType.HEART),
+				CreateBoardSpaceRequest(SpaceType.DIAMOND),
+				CreateBoardSpaceRequest(SpaceType.SPADE),
+				CreateBoardSpaceRequest(SpaceType.CLUB),
 			),
 			paths = listOf(
 				CreateBoardPathRequest(0, 1),
 				CreateBoardPathRequest(1, 2),
-				CreateBoardPathRequest(2, 0),
+				CreateBoardPathRequest(2, 3),
+				CreateBoardPathRequest(3, 4),
+				CreateBoardPathRequest(4, 5),
+				CreateBoardPathRequest(5, 6),
+				CreateBoardPathRequest(6, 7),
+				CreateBoardPathRequest(7, 0),
 			),
 			startSpaceIndex = 0,
 			startingGold = 1000,
+			baseSalary = 200,
+			promotionBonus = 50,
 			districts = listOf(
 				CreateDistrictRequest(
 					name = "Red",

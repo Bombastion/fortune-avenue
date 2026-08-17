@@ -32,20 +32,31 @@ class BoardControllerTest : DatabaseTest() {
 	@Autowired
 	lateinit var restTemplate: TestRestTemplate
 
+	// Every board must include at least one of each of these (see RequiredSpaceTypesValidator) --
+	// appended after whatever spaces a given test actually cares about below.
+	private val requiredSpaceTypeSpaces = listOf(
+		CreateBoardSpaceRequest(SpaceType.BANK),
+		CreateBoardSpaceRequest(SpaceType.HEART),
+		CreateBoardSpaceRequest(SpaceType.DIAMOND),
+		CreateBoardSpaceRequest(SpaceType.SPADE),
+		CreateBoardSpaceRequest(SpaceType.CLUB),
+	)
+
+	/** A closed loop over [spaceCount] spaces in index order (0 -> 1 -> ... -> spaceCount-1 -> 0). */
+	private fun loopPaths(spaceCount: Int) = (0 until spaceCount).map { CreateBoardPathRequest(it, (it + 1) % spaceCount) }
+
 	private fun validRequest(name: String) = CreateBoardRequest(
 		name = name,
 		spaces = listOf(
 			CreateBoardSpaceRequest(SpaceType.BASIC),
 			CreateBoardSpaceRequest(SpaceType.BASIC),
 			CreateBoardSpaceRequest(SpaceType.BASIC),
-		),
-		paths = listOf(
-			CreateBoardPathRequest(0, 1),
-			CreateBoardPathRequest(1, 2),
-			CreateBoardPathRequest(2, 0),
-		),
+		) + requiredSpaceTypeSpaces,
+		paths = loopPaths(8),
 		startSpaceIndex = 0,
 		startingGold = 1000,
+		baseSalary = 200,
+		promotionBonus = 50,
 	)
 
 	@Test
@@ -58,15 +69,37 @@ class BoardControllerTest : DatabaseTest() {
 		val body = response.body
 		assertThat(body).isNotNull()
 		assertThat(body!!.name).isEqualTo(request.name)
-		assertThat(body.spaces).hasSize(3)
-		assertThat(body.paths).hasSize(3)
+		assertThat(body.spaces).hasSize(8)
+		assertThat(body.paths).hasSize(8)
 		assertThat(body.spaces.map { it.id }).contains(body.startSpaceId)
 		assertThat(body.startingGold).isEqualTo(1000)
+		assertThat(body.baseSalary).isEqualTo(200)
+		assertThat(body.promotionBonus).isEqualTo(50)
 	}
 
 	@Test
 	fun `creating a board with a zero or negative startingGold returns 400`() {
 		val request = validRequest("bad-gold-${Uuid.random()}").copy(startingGold = 0)
+
+		val response = restTemplate.postForEntity<ErrorResponse>("/boards", request)
+
+		assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
+		assertThat(response.body?.message).isNotBlank()
+	}
+
+	@Test
+	fun `creating a board with a zero or negative baseSalary returns 400`() {
+		val request = validRequest("bad-base-salary-${Uuid.random()}").copy(baseSalary = 0)
+
+		val response = restTemplate.postForEntity<ErrorResponse>("/boards", request)
+
+		assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
+		assertThat(response.body?.message).isNotBlank()
+	}
+
+	@Test
+	fun `creating a board with a negative promotionBonus returns 400`() {
+		val request = validRequest("bad-promotion-bonus-${Uuid.random()}").copy(promotionBonus = -1)
 
 		val response = restTemplate.postForEntity<ErrorResponse>("/boards", request)
 
@@ -94,7 +127,8 @@ class BoardControllerTest : DatabaseTest() {
 				CreateBoardSpaceRequest(SpaceType.SHOP, baseValue = 250, basePricePercentage = BigDecimal("0.1500")),
 				CreateBoardSpaceRequest(SpaceType.BASIC),
 				CreateBoardSpaceRequest(SpaceType.BASIC),
-			),
+			) + requiredSpaceTypeSpaces,
+			paths = loopPaths(8),
 		)
 
 		val response = restTemplate.postForEntity<BoardResponse>("/boards", request)
@@ -117,7 +151,8 @@ class BoardControllerTest : DatabaseTest() {
 				CreateBoardSpaceRequest(SpaceType.SHOP),
 				CreateBoardSpaceRequest(SpaceType.BASIC),
 				CreateBoardSpaceRequest(SpaceType.BASIC),
-			),
+			) + requiredSpaceTypeSpaces,
+			paths = loopPaths(8),
 		)
 
 		val response = restTemplate.postForEntity<ErrorResponse>("/boards", request)
@@ -134,7 +169,8 @@ class BoardControllerTest : DatabaseTest() {
 				CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0),
 				CreateBoardSpaceRequest(SpaceType.BASIC),
 				CreateBoardSpaceRequest(SpaceType.BASIC),
-			),
+			) + requiredSpaceTypeSpaces,
+			paths = loopPaths(8),
 		)
 
 		val response = restTemplate.postForEntity<BoardResponse>("/boards", request)
@@ -148,7 +184,7 @@ class BoardControllerTest : DatabaseTest() {
 
 		val linkedSpace = body.spaces.first { it.districtId != null }
 		assertThat(linkedSpace.districtId).isEqualTo(district.id)
-		assertThat(body.spaces.count { it.districtId == null }).isEqualTo(2)
+		assertThat(body.spaces.count { it.districtId == null }).isEqualTo(7)
 	}
 
 	@Test
@@ -178,7 +214,8 @@ class BoardControllerTest : DatabaseTest() {
 				CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0),
 				CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0),
 				CreateBoardSpaceRequest(SpaceType.BASIC),
-			),
+			) + requiredSpaceTypeSpaces,
+			paths = loopPaths(8),
 		)
 
 		val response = restTemplate.postForEntity<BoardResponse>("/boards", request)
@@ -200,7 +237,8 @@ class BoardControllerTest : DatabaseTest() {
 				CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0),
 				CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0),
 				CreateBoardSpaceRequest(SpaceType.BASIC),
-			),
+			) + requiredSpaceTypeSpaces,
+			paths = loopPaths(8),
 		)
 
 		val response = restTemplate.postForEntity<ErrorResponse>("/boards", request)
@@ -216,7 +254,8 @@ class BoardControllerTest : DatabaseTest() {
 				CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0),
 				CreateBoardSpaceRequest(SpaceType.BASIC),
 				CreateBoardSpaceRequest(SpaceType.BASIC),
-			),
+			) + requiredSpaceTypeSpaces,
+			paths = loopPaths(8),
 		)
 
 		val response = restTemplate.postForEntity<ErrorResponse>("/boards", request)
