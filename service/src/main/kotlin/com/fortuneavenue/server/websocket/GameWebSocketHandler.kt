@@ -35,7 +35,19 @@ private data class Connection(val gameId: Uuid, val playerId: Uuid)
  * clears them all, bumps a promotion count, and pays out gold (named in the
  * event as `goldAwarded`), broadcast right after that space's
  * `player_moved` event (nothing is broadcast for a BANK space visited
- * without every suit in hand). If that movement reaches a space with more than one path
+ * without every suit in hand). Independent of promotion, that same BANK
+ * space is also checked for a `stock_trading_available` event -- if any
+ * district has stock to trade in this game, movement pauses there (even
+ * mid-move, not just when it's the final stop) with an event naming every
+ * tradeable district's `districtId`, `pricePerShare`, and however much of
+ * it the player already owns -- respond with
+ * `{"type":"buy_stock","districtId":"<id>","quantity":10}`,
+ * `{"type":"sell_stock","districtId":"<id>","quantity":10}` (quantity is
+ * 1-99 either way), or `{"type":"skip_stock_trade"}` to resolve it and keep
+ * moving; `buy_stock`/`sell_stock` come back as an `error` instead if the
+ * trade isn't affordable/owned, leaving the decision still pending. Buying
+ * or selling broadcasts `stock_purchased`/`stock_sold`. If that movement
+ * reaches a space with more than one path
  * out of it, it pauses there and a `choice_required` event lists the
  * options -- respond with `{"type":"choose_path","spaceId":"<id>"}` to pick
  * one and keep moving. If movement instead runs out on an unowned shop, it
@@ -48,10 +60,11 @@ private data class Connection(val gameId: Uuid, val playerId: Uuid)
  * players whose turns immediately follow (once the
  * current player's turn actually ends) are played out automatically too,
  * each broadcast in turn order right after the requested one -- including
- * their own shop purchase decisions, made immediately rather than paused
- * on. The moment that chain lands on a human player, a `turn_started` event
- * names them -- computer turns don't get one, since their own dice_rolled/
- * player_moved events already make it obvious whose turn it was.
+ * their own shop purchase and stock trade decisions, made immediately
+ * rather than paused on. The moment that chain lands on a human player, a
+ * `turn_started` event names them -- computer turns don't get one, since
+ * their own dice_rolled/player_moved events already make it obvious whose
+ * turn it was.
  * See GameSimulationService for the actual rules.
  *
  * Session bookkeeping (who's connected to which game) lives in memory on
@@ -103,9 +116,12 @@ class GameWebSocketHandler(
 		when (clientMessage?.type) {
 			ClientMessageType.READY -> handleReady(session, connection)
 			ClientMessageType.ROLL_DICE -> handleRollDice(session, connection)
-			ClientMessageType.CHOOSE_PATH -> handleChoosePath(session, connection, clientMessage?.spaceId)
+			ClientMessageType.CHOOSE_PATH -> handleChoosePath(session, connection, clientMessage.spaceId)
 			ClientMessageType.BUY_SHOP -> handleBuyShop(session, connection)
 			ClientMessageType.DECLINE_SHOP -> handleDeclineShop(session, connection)
+			ClientMessageType.BUY_STOCK -> handleBuyStock(session, connection, clientMessage.districtId, clientMessage.quantity)
+			ClientMessageType.SELL_STOCK -> handleSellStock(session, connection, clientMessage.districtId, clientMessage.quantity)
+			ClientMessageType.SKIP_STOCK_TRADE -> handleSkipStockTrade(session, connection)
 			else -> send(session, ErrorEvent("Unrecognized message: ${message.payload}"))
 		}
 	}
@@ -164,6 +180,37 @@ class GameWebSocketHandler(
 		)
 	}
 
+	private fun handleBuyStock(session: WebSocketSession, connection: Connection, districtId: String?, quantity: Int?) {
+		val parsedDistrictId = districtId?.let { Uuid.parseOrNull(it) }
+			?: return send(session, ErrorEvent("buy_stock requires a valid districtId."))
+		val parsedQuantity = quantity
+			?: return send(session, ErrorEvent("buy_stock requires a quantity."))
+
+		gameSimulationService.buyStock(connection.gameId, connection.playerId, parsedDistrictId, parsedQuantity).fold(
+			onSuccess = { events -> events.forEach { event -> broadcastTurnEvent(connection.gameId, event) } },
+			onFailure = { error -> send(session, ErrorEvent(error.message ?: "Unable to buy stock.")) },
+		)
+	}
+
+	private fun handleSellStock(session: WebSocketSession, connection: Connection, districtId: String?, quantity: Int?) {
+		val parsedDistrictId = districtId?.let { Uuid.parseOrNull(it) }
+			?: return send(session, ErrorEvent("sell_stock requires a valid districtId."))
+		val parsedQuantity = quantity
+			?: return send(session, ErrorEvent("sell_stock requires a quantity."))
+
+		gameSimulationService.sellStock(connection.gameId, connection.playerId, parsedDistrictId, parsedQuantity).fold(
+			onSuccess = { events -> events.forEach { event -> broadcastTurnEvent(connection.gameId, event) } },
+			onFailure = { error -> send(session, ErrorEvent(error.message ?: "Unable to sell stock.")) },
+		)
+	}
+
+	private fun handleSkipStockTrade(session: WebSocketSession, connection: Connection) {
+		gameSimulationService.skipStockTrade(connection.gameId, connection.playerId).fold(
+			onSuccess = { events -> events.forEach { event -> broadcastTurnEvent(connection.gameId, event) } },
+			onFailure = { error -> send(session, ErrorEvent(error.message ?: "Unable to skip the stock trade.")) },
+		)
+	}
+
 	private fun broadcastTurnEvent(gameId: Uuid, event: GameSimulationService.TurnEvent) {
 		broadcast(gameId, event.toWireEvent())
 		if (event is GameSimulationService.TurnEvent.TurnEnded && event.gameOver) {
@@ -209,6 +256,25 @@ class GameWebSocketHandler(
 			playerId = playerId.toString(),
 			districtId = districtId.toString(),
 			newValuesBySpaceId = newValuesBySpaceId.mapKeys { it.key.toString() },
+		)
+		is GameSimulationService.TurnEvent.StockTradingAvailable -> StockTradingAvailableEvent(
+			playerId = playerId.toString(),
+			spaceId = spaceId.toString(),
+			offers = offers.map { StockTradeOfferPayload(it.districtId.toString(), it.pricePerShare, it.ownedQuantity) },
+		)
+		is GameSimulationService.TurnEvent.StockPurchased -> StockPurchasedEvent(
+			playerId = playerId.toString(),
+			districtId = districtId.toString(),
+			quantity = quantity,
+			pricePerShare = pricePerShare,
+			totalCost = totalCost,
+		)
+		is GameSimulationService.TurnEvent.StockSold -> StockSoldEvent(
+			playerId = playerId.toString(),
+			districtId = districtId.toString(),
+			quantity = quantity,
+			pricePerShare = pricePerShare,
+			totalProceeds = totalProceeds,
 		)
 		is GameSimulationService.TurnEvent.TurnEnded -> TurnEndedEvent(turnNumber = turnNumber, playerId = playerId.toString())
 		is GameSimulationService.TurnEvent.TurnStarted -> TurnStartedEvent(playerId = playerId.toString(), turnNumber = turnNumber)

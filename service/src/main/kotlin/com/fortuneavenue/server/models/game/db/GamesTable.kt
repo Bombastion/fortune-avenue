@@ -1,5 +1,6 @@
 package com.fortuneavenue.server.models.game.db
 
+import com.fortuneavenue.server.models.board.db.BoardSpacesTable
 import com.fortuneavenue.server.models.board.db.BoardsTable
 import org.jetbrains.exposed.v1.core.UuidColumnType
 import org.jetbrains.exposed.v1.core.dao.id.UuidTable
@@ -26,4 +27,11 @@ object GamesTable : UuidTable("games") {
 	// (paused, unchanged, while a human is choosing a branch), and cleared
 	// back to null the moment their turn ends.
 	val currentMovementPoints = integer("current_movement_points").nullable()
+
+	// Set the moment movement passes or lands on a BANK space (mid-move or as the final stop),
+	// pausing there for a stock trade decision -- see GameSimulationService.checkStockTrade.
+	// Null the rest of the time. Kept separate from current_movement_points above because this
+	// pause can happen with movement still left, unlike a shop purchase (current_movement_points
+	// == 0 specifically) -- see the migration.
+	val pendingStockTradeSpaceId = optReference("pending_stock_trade_space_id", BoardSpacesTable)
 }

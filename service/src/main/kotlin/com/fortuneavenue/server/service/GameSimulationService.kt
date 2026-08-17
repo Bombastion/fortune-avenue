@@ -5,6 +5,7 @@ import com.fortuneavenue.server.dao.GameDao
 import com.fortuneavenue.server.dao.GameDistrictInformationDao
 import com.fortuneavenue.server.dao.GameShopInformationDao
 import com.fortuneavenue.server.dao.PlayerDao
+import com.fortuneavenue.server.dao.PlayerStockDao
 import com.fortuneavenue.server.models.board.db.BoardGraph
 import com.fortuneavenue.server.models.board.db.BoardPath
 import com.fortuneavenue.server.models.board.db.GameShopInformation
@@ -56,7 +57,16 @@ import kotlin.uuid.Uuid
  * (see PlayerDao.incrementPromotionCount), and they're paid out board.baseSalary +
  * (board.promotionBonus * however many times they'd already been promoted this game) + the
  * current value of every shop they own, announced with a [TurnEvent.Promoted]. A BANK space is
- * otherwise a no-op -- nothing happens visiting one without every suit in hand.
+ * otherwise a no-op for promotion purposes -- nothing happens visiting one without every suit in
+ * hand.
+ *
+ * Independent of promotion, a BANK space also always offers a stock trade decision (see
+ * [checkStockTrade]) if any district has stock to trade in this game: a human player pauses
+ * there (a [TurnEvent.StockTradingAvailable] naming every tradeable district) until
+ * [buyStock]/[sellStock]/[skipStockTrade] resolves it -- unlike a shop purchase, this pause can
+ * happen with movement still left, since a BANK space can be merely passed through mid-move, not
+ * just landed on. A computer player instead decides immediately via
+ * [ComputerPlayer.chooseStockTrade] (no real policy yet) and never pauses.
  *
  * A player with no [com.fortuneavenue.server.models.player.db.Player.userId]
  * is a computer opponent -- there's nobody connected who could ready it up
@@ -71,6 +81,7 @@ class GameSimulationService(
 	private val boardDao: BoardDao,
 	private val gameShopInformationDao: GameShopInformationDao,
 	private val gameDistrictInformationDao: GameDistrictInformationDao,
+	private val playerStockDao: PlayerStockDao,
 	private val dice: Dice,
 	private val computerPlayer: ComputerPlayer,
 ) {
@@ -171,6 +182,38 @@ class GameSimulationService(
 			val newValuesBySpaceId: Map<Uuid, Int>,
 		) : TurnEvent
 
+		/**
+		 * [playerId] passed or landed on [spaceId], a BANK space with at least one district's
+		 * stock to trade -- paused until [buyStock], [sellStock], or [skipStockTrade] decides
+		 * what to do, exactly one decision before movement resumes. [offers] names every
+		 * district currently tradeable, its price per share, and however much of it [playerId]
+		 * already holds. Only ever emitted for a human; a computer player decides immediately
+		 * instead (see [ComputerPlayer.chooseStockTrade]).
+		 */
+		data class StockTradingAvailable(
+			override val playerId: Uuid,
+			val spaceId: Uuid,
+			val offers: List<StockTradeOffer>,
+		) : TurnEvent
+
+		/** [playerId] bought [quantity] shares of [districtId]'s stock at [pricePerShare] each, for [totalCost] gold, deducted from their gold. */
+		data class StockPurchased(
+			override val playerId: Uuid,
+			val districtId: Uuid,
+			val quantity: Int,
+			val pricePerShare: Int,
+			val totalCost: Int,
+		) : TurnEvent
+
+		/** [playerId] sold [quantity] shares of [districtId]'s stock at [pricePerShare] each, for [totalProceeds] gold, credited to their gold. */
+		data class StockSold(
+			override val playerId: Uuid,
+			val districtId: Uuid,
+			val quantity: Int,
+			val pricePerShare: Int,
+			val totalProceeds: Int,
+		) : TurnEvent
+
 		data class TurnEnded(
 			override val playerId: Uuid,
 			val turnNumber: Int,
@@ -243,12 +286,14 @@ class GameSimulationService(
 	 * spaces -- automatically, one at a time, until either movement runs out
 	 * (ending the turn), a branch is reached and paused on ([choosePath]
 	 * picks up from there), a purchase decision is reached and paused on
-	 * ([buyShop]/[declineShopPurchase] picks up from there), or the game
-	 * ends. Whichever computer players immediately follow in turn order then
-	 * get their own full turns played out the same way, stopping once it's a
-	 * human's turn again or the game ends. The result is always at least one
-	 * event (the roll) and is in order, so the caller can report each one
-	 * (e.g. as a broadcast per entry) as it happens.
+	 * ([buyShop]/[declineShopPurchase] picks up from there), a stock trade
+	 * decision is reached and paused on ([buyStock]/[sellStock]/
+	 * [skipStockTrade] picks up from there), or the game ends. Whichever
+	 * computer players immediately follow in turn order then get their own
+	 * full turns played out the same way, stopping once it's a human's turn
+	 * again or the game ends. The result is always at least one event (the
+	 * roll) and is in order, so the caller can report each one (e.g. as a
+	 * broadcast per entry) as it happens.
 	 */
 	fun rollDice(gameId: Uuid, playerId: Uuid): Result<List<TurnEvent>> {
 		val game = currentTurnGame(gameId, playerId).getOrElse { return Result.failure(it) }
@@ -286,6 +331,9 @@ class GameSimulationService(
 		val game = currentTurnGame(gameId, playerId).getOrElse { return Result.failure(it) }
 		val remaining = game.currentMovementPoints
 			?: return Result.failure(InvalidTurnException("Player $playerId hasn't rolled the dice yet."))
+		if (game.pendingStockTradeSpaceId != null) {
+			return Result.failure(InvalidTurnException("Player $playerId has a stock trade decision pending -- resolve it first."))
+		}
 
 		val playersById = playerDao.findByGameId(gameId).associateBy { it.id.value }
 		val player = playersById[playerId]
@@ -301,12 +349,20 @@ class GameSimulationService(
 		val chosenPath = outgoing.find { it.toSpaceId.value == toSpaceId }
 			?: return Result.failure(InvalidTurnException("$toSpaceId isn't a path out of player $playerId's current space."))
 
+		val isComputer = player.userId == null
 		val movementPointsRemaining = remaining - 1
-		val events = applyMove(gameId, playerId, game.turnNumber, currentSpaceId, chosenPath, movementPointsRemaining, boardGraph).toMutableList()
+		val step = takeStep(gameId, playerId, isComputer, game.turnNumber, currentSpaceId, chosenPath, movementPointsRemaining, boardGraph)
+		val events = step.events.toMutableList()
+
+		if (step.paused) {
+			gameDao.setMovementPoints(gameId, movementPointsRemaining)
+			return Result.success(events)
+		}
+
 		val movement = advanceMovement(
 			gameId,
 			playerId,
-			player.userId == null,
+			isComputer,
 			game,
 			boardGraph,
 			chosenPath.toSpaceId.value,
@@ -358,6 +414,45 @@ class GameSimulationService(
 		return Result.success(events)
 	}
 
+	/**
+	 * Buys [quantity] shares (1-99, see [MIN_STOCK_TRADE_QUANTITY]/[MAX_STOCK_TRADE_QUANTITY])
+	 * of [districtId]'s stock for [playerId], at that district's current price per share (see
+	 * [executeBuyStock]) -- resolving the pending decision from
+	 * [TurnEvent.StockTradingAvailable] and resuming movement from wherever it paused, exactly
+	 * as [buyShop] resumes after a shop purchase. Chains into any following computer players'
+	 * turns exactly as [rollDice]/[choosePath]/[buyShop] do.
+	 */
+	fun buyStock(gameId: Uuid, playerId: Uuid, districtId: Uuid, quantity: Int): Result<List<TurnEvent>> {
+		val (game, playersById) = pendingStockTrade(gameId, playerId).getOrElse { return Result.failure(it) }
+		val purchased = executeBuyStock(gameId, playerId, districtId, quantity).getOrElse { return Result.failure(it) }
+
+		val movement = resumeAfterStockTrade(gameId, playerId, game, listOf(purchased)).getOrElse { return Result.failure(it) }
+		val events = movement.events + chainComputerTurns(gameId, movement, playersById)
+
+		return Result.success(events)
+	}
+
+	/** Sells [quantity] shares of [districtId]'s stock [playerId] currently holds (see [executeSellStock]) -- otherwise exactly like [buyStock]. */
+	fun sellStock(gameId: Uuid, playerId: Uuid, districtId: Uuid, quantity: Int): Result<List<TurnEvent>> {
+		val (game, playersById) = pendingStockTrade(gameId, playerId).getOrElse { return Result.failure(it) }
+		val sold = executeSellStock(gameId, playerId, districtId, quantity).getOrElse { return Result.failure(it) }
+
+		val movement = resumeAfterStockTrade(gameId, playerId, game, listOf(sold)).getOrElse { return Result.failure(it) }
+		val events = movement.events + chainComputerTurns(gameId, movement, playersById)
+
+		return Result.success(events)
+	}
+
+	/** Declines the pending trade from [TurnEvent.StockTradingAvailable] and resumes movement without buying or selling anything. */
+	fun skipStockTrade(gameId: Uuid, playerId: Uuid): Result<List<TurnEvent>> {
+		val (game, playersById) = pendingStockTrade(gameId, playerId).getOrElse { return Result.failure(it) }
+
+		val movement = resumeAfterStockTrade(gameId, playerId, game, emptyList()).getOrElse { return Result.failure(it) }
+		val events = movement.events + chainComputerTurns(gameId, movement, playersById)
+
+		return Result.success(events)
+	}
+
 	/** Validates that it's actually [playerId]'s turn to act right now, returning the game if so. */
 	private fun currentTurnGame(gameId: Uuid, playerId: Uuid): Result<Game> {
 		val game = gameDao.findById(gameId)
@@ -400,18 +495,38 @@ class GameSimulationService(
 		return Result.success(Triple(game, shop, playersById))
 	}
 
+	/**
+	 * Validates that [playerId] actually has a stock trade decision pending -- i.e. movement
+	 * paused this turn on a BANK space with stock to trade (see
+	 * [TurnEvent.StockTradingAvailable]) -- for [buyStock]/[sellStock]/[skipStockTrade]. Unlike
+	 * [pendingShopPurchase], this doesn't reuse currentMovementPoints as the signal (this pause
+	 * can happen with movement still left) -- see GamesTable.pendingStockTradeSpaceId.
+	 */
+	private fun pendingStockTrade(gameId: Uuid, playerId: Uuid): Result<Pair<Game, Map<Uuid, Player>>> {
+		val game = currentTurnGame(gameId, playerId).getOrElse { return Result.failure(it) }
+		if (game.pendingStockTradeSpaceId == null) {
+			return Result.failure(InvalidTurnException("Player $playerId has no stock trade decision pending."))
+		}
+
+		val playersById = playerDao.findByGameId(gameId).associateBy { it.id.value }
+		return Result.success(game to playersById)
+	}
+
 	private data class MovementResult(val events: List<TurnEvent>, val updatedGame: Game)
 
 	/**
 	 * Moves a player forward from [startingSpaceId] with [startingMovementPoints]
-	 * left to spend -- one space at a time -- stopping in one of four ways:
+	 * left to spend -- one space at a time -- stopping in one of five ways:
 	 * movement runs out on an ordinary space (the turn ends), it runs out on
 	 * an unowned shop (a human pauses for a purchase decision; a computer
-	 * decides immediately and the turn ends), a computer player is moving
-	 * and hits a branch (picks randomly and keeps going, so pausing never
-	 * actually happens for one), or a human player hits a branch (pauses
-	 * here, persisting the remaining movement so a later [choosePath] call,
-	 * even after a reconnect, can pick up from it).
+	 * decides immediately and the turn ends), any space along the way is a
+	 * BANK space with stock to trade (a human pauses for a trade decision;
+	 * a computer decides immediately and movement keeps going -- see
+	 * [checkStockTrade]), a computer player is moving and hits a branch
+	 * (picks randomly and keeps going, so pausing never actually happens for
+	 * one), or a human player hits a branch (pauses here, persisting the
+	 * remaining movement so a later [choosePath] call, even after a
+	 * reconnect, can pick up from it).
 	 */
 	private fun advanceMovement(
 		gameId: Uuid,
@@ -444,8 +559,14 @@ class GameSimulationService(
 
 			val chosenPath = if (outgoing.size > 1) computerPlayer.chooseBranch(outgoing) else outgoing.single()
 			remaining -= 1
-			events += applyMove(gameId, playerId, game.turnNumber, currentSpaceId, chosenPath, remaining, boardGraph)
+			val step = takeStep(gameId, playerId, isComputer, game.turnNumber, currentSpaceId, chosenPath, remaining, boardGraph)
+			events += step.events
 			currentSpaceId = chosenPath.toSpaceId.value
+
+			if (step.paused) {
+				gameDao.setMovementPoints(gameId, remaining)
+				return Result.success(MovementResult(events, game))
+			}
 		}
 
 		val unownedShop = gameShopInformationDao.findByGameAndSpace(gameId, currentSpaceId)?.takeIf { it.ownerId == null }
@@ -525,6 +646,90 @@ class GameSimulationService(
 		return events
 	}
 
+	/**
+	 * Buys [quantity] shares (1-99) of [districtId]'s stock for [playerId], at that district's
+	 * current_stock_value per share -- paid out of their gold, which must cover the full
+	 * quantity * price up front; fails outright otherwise, exactly like [buyShop]. Shared by the
+	 * human-facing [buyStock] and a computer player's automatic decision in [checkStockTrade].
+	 */
+	private fun executeBuyStock(gameId: Uuid, playerId: Uuid, districtId: Uuid, quantity: Int): Result<TurnEvent.StockPurchased> {
+		if (quantity !in MIN_STOCK_TRADE_QUANTITY..MAX_STOCK_TRADE_QUANTITY) {
+			return Result.failure(
+				InvalidTurnException("Quantity must be between $MIN_STOCK_TRADE_QUANTITY and $MAX_STOCK_TRADE_QUANTITY shares."),
+			)
+		}
+		val info = gameDistrictInformationDao.findByGameAndDistrict(gameId, districtId)
+			?: return Result.failure(InvalidTurnException("District $districtId has no stock to trade in game $gameId."))
+
+		val totalCost = info.currentStockValue * quantity
+		val gold = currentGold(playerId) ?: return Result.failure(InvalidPlayerException("Player $playerId has no state."))
+		if (gold < totalCost) {
+			return Result.failure(
+				InvalidTurnException(
+					"Player $playerId can't afford $quantity shares of district $districtId -- it costs $totalCost but they only have $gold gold.",
+				),
+			)
+		}
+
+		playerDao.adjustGold(playerId, -totalCost)
+		playerStockDao.adjustQuantity(playerId, info.id.value, quantity)
+		return Result.success(TurnEvent.StockPurchased(playerId, districtId, quantity, info.currentStockValue, totalCost))
+	}
+
+	/**
+	 * Sells [quantity] shares (1-99) of [districtId]'s stock [playerId] currently holds, at that
+	 * district's current_stock_value per share -- credited to their gold. Can't sell more than
+	 * currently held; fails outright otherwise. Shared by the human-facing [sellStock] and a
+	 * computer player's automatic decision in [checkStockTrade].
+	 */
+	private fun executeSellStock(gameId: Uuid, playerId: Uuid, districtId: Uuid, quantity: Int): Result<TurnEvent.StockSold> {
+		if (quantity !in MIN_STOCK_TRADE_QUANTITY..MAX_STOCK_TRADE_QUANTITY) {
+			return Result.failure(
+				InvalidTurnException("Quantity must be between $MIN_STOCK_TRADE_QUANTITY and $MAX_STOCK_TRADE_QUANTITY shares."),
+			)
+		}
+		val info = gameDistrictInformationDao.findByGameAndDistrict(gameId, districtId)
+			?: return Result.failure(InvalidTurnException("District $districtId has no stock to trade in game $gameId."))
+
+		val owned = playerStockDao.find(playerId, info.id.value)?.quantity ?: 0
+		if (quantity > owned) {
+			return Result.failure(InvalidTurnException("Player $playerId only owns $owned shares of district $districtId -- can't sell $quantity."))
+		}
+
+		val totalProceeds = info.currentStockValue * quantity
+		playerDao.adjustGold(playerId, totalProceeds)
+		playerStockDao.adjustQuantity(playerId, info.id.value, -quantity)
+		return Result.success(TurnEvent.StockSold(playerId, districtId, quantity, info.currentStockValue, totalProceeds))
+	}
+
+	/**
+	 * Clears the pending stock trade decision and continues wherever movement paused for it --
+	 * ending the turn if no movement was left, or resuming movement from the player's current
+	 * position with whatever was left otherwise. [precedingEvents] (a StockPurchased, StockSold,
+	 * or nothing for a skip) leads whatever comes next.
+	 */
+	private fun resumeAfterStockTrade(gameId: Uuid, playerId: Uuid, game: Game, precedingEvents: List<TurnEvent>): Result<MovementResult> {
+		gameDao.setPendingStockTradeSpace(gameId, null)
+
+		val remaining = game.currentMovementPoints ?: 0
+		if (remaining <= 0) {
+			return endTurn(gameId, playerId, game, precedingEvents)
+		}
+
+		val boardGraph = boardDao.findById(game.boardId.value)
+			?: return Result.failure(InvalidTurnException("Board for game $gameId no longer exists."))
+		val state = playerDao.findState(playerId)
+			?: return Result.failure(InvalidPlayerException("Player $playerId has no state."))
+		val currentSpaceId = state.currentSpaceId?.value
+			?: return Result.failure(InvalidTurnException("Player $playerId has no current space."))
+
+		// Only a human ever gets here -- buyStock/sellStock/skipStockTrade are all responses to
+		// a pause that, per [checkStockTrade], only ever happens for a human in the first place.
+		val movement = advanceMovement(gameId, playerId, isComputer = false, game, boardGraph, currentSpaceId, remaining)
+			.getOrElse { return Result.failure(it) }
+		return Result.success(MovementResult(precedingEvents + movement.events, movement.updatedGame))
+	}
+
 	private fun boosted(value: Int, percentage: BigDecimal): Int =
 		(BigDecimal(value) * (BigDecimal.ONE + percentage)).setScale(0, RoundingMode.HALF_UP).toInt()
 
@@ -534,28 +739,40 @@ class GameSimulationService(
 	/** Whether [playerId] currently has at least [price] gold on hand -- a missing state counts as no. */
 	private fun canAfford(playerId: Uuid, price: Int): Boolean = (currentGold(playerId) ?: 0) >= price
 
+	private data class StepResult(val events: List<TurnEvent>, val paused: Boolean)
+
 	/**
 	 * Moves [playerId] onto [path]'s destination and returns the resulting events -- always a
 	 * leading [TurnEvent.Moved], plus a [TurnEvent.SuitPickedUp] if that destination is a suit
 	 * space and picking it up was actually new (see [pickUpSuit]), plus a [TurnEvent.Promoted] if
-	 * it's a BANK space reached while holding all 4 suits (see [checkPromotion]). Every space a
-	 * player is moved onto over the course of a turn -- passed through mid-move or landed on at
-	 * the end -- flows through here exactly once
+	 * it's a BANK space reached while holding all 4 suits (see [checkPromotion]), plus whatever
+	 * [checkStockTrade] adds for that same BANK space, independent of whether a promotion
+	 * actually happened. [StepResult.paused] is true if that last check paused movement for a
+	 * human's stock trade decision -- callers must stop advancing movement themselves when it is,
+	 * exactly as they already do for a branch pause. Every space a player is moved onto over the
+	 * course of a turn -- passed through mid-move or landed on at the end -- flows through here
+	 * exactly once.
 	 */
-	private fun applyMove(
+	private fun takeStep(
 		gameId: Uuid,
 		playerId: Uuid,
+		isComputer: Boolean,
 		turnNumber: Int,
 		fromSpaceId: Uuid,
 		path: BoardPath,
 		movementPointsRemaining: Int,
 		boardGraph: BoardGraph,
-	): List<TurnEvent> {
+	): StepResult {
 		playerDao.updatePosition(playerId, path.toSpaceId.value)
 		val moved = TurnEvent.Moved(playerId, turnNumber, fromSpaceId, path.toSpaceId.value, movementPointsRemaining)
-		return listOf(moved) +
-			pickUpSuit(playerId, path.toSpaceId.value, boardGraph) +
-			checkPromotion(gameId, playerId, path.toSpaceId.value, boardGraph)
+		val events = mutableListOf<TurnEvent>(moved)
+		events += pickUpSuit(playerId, path.toSpaceId.value, boardGraph)
+		events += checkPromotion(gameId, playerId, path.toSpaceId.value, boardGraph)
+
+		val trade = checkStockTrade(gameId, playerId, isComputer, path.toSpaceId.value, boardGraph)
+		events += trade.events
+
+		return StepResult(events, trade.paused)
 	}
 
 	/**
@@ -595,6 +812,55 @@ class GameSimulationService(
 		playerDao.adjustGold(playerId, goldAwarded)
 
 		return listOf(TurnEvent.Promoted(playerId, spaceId, goldAwarded))
+	}
+
+	private data class StockTradeCheck(val events: List<TurnEvent>, val paused: Boolean)
+
+	/**
+	 * [spaceId] offers a stock trade decision for [playerId] if it's a BANK space (see
+	 * [SpaceType]) with at least one district's stock available to trade -- checked on every
+	 * space passed or landed on, exactly alongside [checkPromotion], independent of whether a
+	 * promotion actually happened there. A human player pauses here (a
+	 * [TurnEvent.StockTradingAvailable] naming every tradeable district -- see [stockOffers])
+	 * until [buyStock]/[sellStock]/[skipStockTrade] resolves it, persisted via
+	 * games.pending_stock_trade_space_id (see GamesTable) since -- unlike a shop purchase --
+	 * this can happen with movement still left, so current_movement_points alone can't double as
+	 * the pause signal here. A computer player instead decides immediately via
+	 * [ComputerPlayer.chooseStockTrade] and never pauses -- see [executeBuyStock]/
+	 * [executeSellStock] for the same affordability/ownership floors enforced either way. A
+	 * no-op for any other space type, or a BANK space with no district stock to trade.
+	 */
+	private fun checkStockTrade(gameId: Uuid, playerId: Uuid, isComputer: Boolean, spaceId: Uuid, boardGraph: BoardGraph): StockTradeCheck {
+		boardGraph.spaces.find { it.id.value == spaceId }?.spaceType?.takeIf { it == SpaceType.BANK }
+			?: return StockTradeCheck(emptyList(), paused = false)
+
+		val offers = stockOffers(gameId, playerId)
+		if (offers.isEmpty()) return StockTradeCheck(emptyList(), paused = false)
+
+		if (!isComputer) {
+			gameDao.setPendingStockTradeSpace(gameId, spaceId)
+			return StockTradeCheck(listOf(TurnEvent.StockTradingAvailable(playerId, spaceId, offers)), paused = true)
+		}
+
+		val event = when (val decision = computerPlayer.chooseStockTrade(offers, currentGold(playerId) ?: 0)) {
+			is StockTradeDecision.Buy -> executeBuyStock(gameId, playerId, decision.districtId, decision.quantity).getOrNull()
+			is StockTradeDecision.Sell -> executeSellStock(gameId, playerId, decision.districtId, decision.quantity).getOrNull()
+			null -> null
+		}
+		return StockTradeCheck(listOfNotNull(event), paused = false)
+	}
+
+	/** Every district in [gameId] with stock to trade, from [playerId]'s point of view (their current holding in each, if any). */
+	private fun stockOffers(gameId: Uuid, playerId: Uuid): List<StockTradeOffer> {
+		val ownedByInfoId = playerStockDao.findByPlayer(playerId).associate { it.gameDistrictInformationId.value to it.quantity }
+		return gameDistrictInformationDao.findAllByGame(gameId).map { info ->
+			StockTradeOffer(
+				districtId = info.districtId.value,
+				gameDistrictInformationId = info.id.value,
+				pricePerShare = info.currentStockValue,
+				ownedQuantity = ownedByInfoId[info.id.value] ?: 0,
+			)
+		}
 	}
 
 	/** Only chains into the next player(s) once [movement] actually ended the turn rather than pausing on a choice. */
@@ -667,6 +933,8 @@ class GameSimulationService(
 
 	companion object {
 		private const val MIN_SHOPS_OWNED_TO_RECALCULATE = 2
+		private const val MIN_STOCK_TRADE_QUANTITY = 1
+		private const val MAX_STOCK_TRADE_QUANTITY = 99
 		private val SUIT_SPACE_TYPES = setOf(SpaceType.HEART, SpaceType.DIAMOND, SpaceType.SPADE, SpaceType.CLUB)
 	}
 }

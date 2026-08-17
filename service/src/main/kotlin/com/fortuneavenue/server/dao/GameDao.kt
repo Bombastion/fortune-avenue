@@ -1,5 +1,6 @@
 package com.fortuneavenue.server.dao
 
+import com.fortuneavenue.server.models.board.db.BoardSpacesTable
 import com.fortuneavenue.server.models.board.db.BoardsTable
 import com.fortuneavenue.server.models.game.db.Game
 import org.jetbrains.exposed.v1.core.dao.id.EntityID
@@ -27,6 +28,15 @@ class GameDao {
 	/** Records a roll's remaining movement (or, once a turn pauses on a branch choice, however much is left of it). */
 	fun setMovementPoints(id: Uuid, points: Int?): Game? = transaction {
 		Game.findById(id)?.apply { currentMovementPoints = points }
+	}
+
+	/**
+	 * Sets (or, with a null [spaceId], clears) the BANK space [id]'s turn is currently paused on
+	 * for a stock trade decision -- see GamesTable.pendingStockTradeSpaceId and
+	 * GameSimulationService.checkStockTrade.
+	 */
+	fun setPendingStockTradeSpace(id: Uuid, spaceId: Uuid?): Game? = transaction {
+		Game.findById(id)?.apply { pendingStockTradeSpaceId = spaceId?.let { EntityID(it, BoardSpacesTable) } }
 	}
 
 	/** Ends the current player's turn: advances to the next player and clears any leftover movement. */

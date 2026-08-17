@@ -75,6 +75,16 @@ class GameDistrictInformationDao {
 		}.firstOrNull()
 	}
 
+	/**
+	 * Every district in [gameId] that got a seeded row -- i.e. every district containing at
+	 * least one SHOP space (see [seedForGame]). Unlike [findByGameAndDistrict], not scoped to a
+	 * single district -- used to list what a player can trade at a BANK space (see
+	 * GameSimulationService's stock trading pause).
+	 */
+	fun findAllByGame(gameId: Uuid): List<GameDistrictInformation> = transaction {
+		GameDistrictInformation.find { GameDistrictInformationTable.gameId eq EntityID(gameId, GamesTable) }.toList()
+	}
+
 	/** The average currentValue of [shops], multiplied by [minimumStockPercentage] and rounded to the nearest whole gold. */
 	private fun computeCurrentStockValue(shops: List<GameShopInformation>, minimumStockPercentage: BigDecimal): Int {
 		val average = shops.sumOf { it.currentValue }
