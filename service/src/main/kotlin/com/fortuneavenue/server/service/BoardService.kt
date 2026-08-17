@@ -17,11 +17,15 @@ class BoardService(
 		val edges = request.paths.map { BoardGraphValidator.Edge(from = it.from, to = it.to) }
 
 		val startingGoldErrors = if (request.startingGold > 0) emptyList() else listOf("startingGold must be a positive integer.")
+		val baseSalaryErrors = if (request.baseSalary > 0) emptyList() else listOf("baseSalary must be a positive integer.")
+		val promotionBonusErrors = if (request.promotionBonus >= 0) emptyList() else listOf("promotionBonus must be zero or a positive integer.")
 
 		val errors = ShopSpaceValidator.validate(request.spaces) +
 			DistrictValidator.validate(request) +
 			DistrictProgressionValidator.validate(request) +
 			startingGoldErrors +
+			baseSalaryErrors +
+			promotionBonusErrors +
 			BoardGraphValidator.validate(
 				spaceCount = request.spaces.size,
 				edges = edges,
@@ -45,6 +49,8 @@ class BoardService(
 			pathInputs = request.paths.map { BoardDao.PathInput(it.from, it.to, it.branchOrder) },
 			startIndex = request.startSpaceIndex,
 			startingGold = request.startingGold,
+			baseSalary = request.baseSalary,
+			promotionBonus = request.promotionBonus,
 			districtInputs = request.districts.map { district ->
 				BoardDao.DistrictInput(
 					name = district.name,

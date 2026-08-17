@@ -174,35 +174,60 @@ class PlayerDaoTest : DatabaseTest() {
 		assertThat(result).isNull()
 	}
 
-	private val allSuits = setOf(SpaceType.HEART, SpaceType.DIAMOND, SpaceType.SPADE, SpaceType.CLUB)
-
 	@Test
-	fun `clearHeldSuitsIfComplete clears every held suit once all 4 are held`() {
+	fun `clearHeldSuits clears every held suit, unconditionally`() {
 		val player = playerDao.create(gameId = createGame().id.value)
-		allSuits.forEach { playerDao.addHeldSuit(player.id.value, it) }
+		playerDao.addHeldSuit(player.id.value, SpaceType.HEART)
+		playerDao.addHeldSuit(player.id.value, SpaceType.DIAMOND)
 
-		val cleared = playerDao.clearHeldSuitsIfComplete(player.id.value, allSuits)
+		val cleared = playerDao.clearHeldSuits(player.id.value)
 
-		assertThat(cleared).isTrue()
+		assertThat(cleared).isNotNull()
+		assertThat(cleared!!.heldSuits).isEmpty()
 		assertThat(playerDao.findState(player.id.value)!!.heldSuits).isEmpty()
 	}
 
 	@Test
-	fun `clearHeldSuitsIfComplete leaves held suits untouched when even one is missing`() {
+	fun `clearHeldSuits is a no-op, not an error, for a player already holding no suits`() {
 		val player = playerDao.create(gameId = createGame().id.value)
-		playerDao.addHeldSuit(player.id.value, SpaceType.HEART)
-		playerDao.addHeldSuit(player.id.value, SpaceType.DIAMOND)
-		playerDao.addHeldSuit(player.id.value, SpaceType.SPADE)
 
-		val cleared = playerDao.clearHeldSuitsIfComplete(player.id.value, allSuits)
+		val cleared = playerDao.clearHeldSuits(player.id.value)
 
-		assertThat(cleared).isFalse()
-		assertThat(playerDao.findState(player.id.value)!!.heldSuits).containsExactlyInAnyOrder("HEART", "DIAMOND", "SPADE")
+		assertThat(cleared).isNotNull()
+		assertThat(playerDao.findState(player.id.value)!!.heldSuits).isEmpty()
 	}
 
 	@Test
-	fun `clearHeldSuitsIfComplete returns null for a player id that does not exist`() {
-		val result = playerDao.clearHeldSuitsIfComplete(Uuid.random(), allSuits)
+	fun `clearHeldSuits returns null for a player id that does not exist`() {
+		val result = playerDao.clearHeldSuits(Uuid.random())
+
+		assertThat(result).isNull()
+	}
+
+	@Test
+	fun `create also persists state with a promotionCount of 0`() {
+		val game = createGame()
+
+		val created = playerDao.create(gameId = game.id.value)
+
+		assertThat(playerDao.findState(created.id.value)!!.promotionCount).isEqualTo(0)
+	}
+
+	@Test
+	fun `incrementPromotionCount adds 1, and can be called repeatedly`() {
+		val player = playerDao.create(gameId = createGame().id.value)
+
+		val afterFirst = playerDao.incrementPromotionCount(player.id.value)
+		val afterSecond = playerDao.incrementPromotionCount(player.id.value)
+
+		assertThat(afterFirst?.promotionCount).isEqualTo(1)
+		assertThat(afterSecond?.promotionCount).isEqualTo(2)
+		assertThat(playerDao.findState(player.id.value)!!.promotionCount).isEqualTo(2)
+	}
+
+	@Test
+	fun `incrementPromotionCount returns null for a player id that does not exist`() {
+		val result = playerDao.incrementPromotionCount(Uuid.random())
 
 		assertThat(result).isNull()
 	}

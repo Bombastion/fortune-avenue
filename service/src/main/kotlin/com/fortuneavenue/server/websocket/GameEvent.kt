@@ -45,11 +45,13 @@ data class SuitPickedUpEvent(
 
 /**
  * [playerId] was promoted at [spaceId] (a BANK space) after passing or landing on it while
- * holding all 4 suits -- their held suits have been cleared entirely.
+ * holding all 4 suits -- their held suits have been cleared, their promotion count went up by
+ * one, and they were paid [goldAwarded] gold.
  */
 data class PromotedEvent(
 	val playerId: String,
 	val spaceId: String,
+	val goldAwarded: Int,
 	override val type: String = "promoted",
 ) : GameEvent
 

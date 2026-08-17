@@ -154,6 +154,8 @@ class GameWebSocketHandlerTest : DatabaseTest() {
 			),
 			startSpaceIndex = 0,
 			startingGold = 1000,
+			baseSalary = 200,
+			promotionBonus = 50,
 		),
 	).body!!
 
@@ -179,6 +181,8 @@ class GameWebSocketHandlerTest : DatabaseTest() {
 			),
 			startSpaceIndex = 0,
 			startingGold = 1000,
+			baseSalary = 200,
+			promotionBonus = 50,
 		),
 	).body!!
 
@@ -217,6 +221,8 @@ class GameWebSocketHandlerTest : DatabaseTest() {
 			),
 			startSpaceIndex = 0,
 			startingGold = startingGold,
+			baseSalary = 200,
+			promotionBonus = 50,
 		),
 	).body!!
 
@@ -243,6 +249,8 @@ class GameWebSocketHandlerTest : DatabaseTest() {
 			),
 			startSpaceIndex = 0,
 			startingGold = 1000,
+			baseSalary = 200,
+			promotionBonus = 50,
 			districts = listOf(
 				CreateDistrictRequest(
 					name = "Red",

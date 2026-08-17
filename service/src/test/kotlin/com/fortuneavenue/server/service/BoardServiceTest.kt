@@ -48,6 +48,8 @@ class BoardServiceTest {
 		),
 		startSpaceIndex = 0,
 		startingGold = 1000,
+		baseSalary = 200,
+		promotionBonus = 50,
 	)
 
 	@Test
@@ -59,7 +61,15 @@ class BoardServiceTest {
 		val expectedPathInputs = request.paths.map { BoardDao.PathInput(it.from, it.to, it.branchOrder) }
 
 		given(
-			boardDao.create(request.name, expectedSpaceInputs, expectedPathInputs, request.startSpaceIndex),
+			boardDao.create(
+				name = request.name,
+				spaceInputs = expectedSpaceInputs,
+				pathInputs = expectedPathInputs,
+				startIndex = request.startSpaceIndex,
+				startingGold = request.startingGold,
+				baseSalary = request.baseSalary,
+				promotionBonus = request.promotionBonus,
+			),
 		).willReturn(expectedGraph)
 
 		val result = boardService.createBoard(request)
@@ -277,6 +287,72 @@ class BoardServiceTest {
 		assertThat(boardService.createBoard(validRequest().copy(startingGold = 0)).isFailure).isTrue()
 		assertThat(boardService.createBoard(validRequest().copy(startingGold = -1)).isFailure).isTrue()
 		verifyNoInteractions(boardDao)
+	}
+
+	// --- baseSalary / promotionBonus ---
+
+	@Test
+	fun `a board's baseSalary and promotionBonus are passed through to the DAO`() {
+		val request = validRequest().copy(baseSalary = 400, promotionBonus = 125)
+		val expectedGraph = mock(BoardGraph::class.java)
+
+		val expectedSpaceInputs = request.spaces.map { BoardDao.SpaceInput(it.spaceType) }
+		val expectedPathInputs = request.paths.map { BoardDao.PathInput(it.from, it.to, it.branchOrder) }
+
+		given(
+			boardDao.create(
+				name = request.name,
+				spaceInputs = expectedSpaceInputs,
+				pathInputs = expectedPathInputs,
+				startIndex = request.startSpaceIndex,
+				startingGold = request.startingGold,
+				baseSalary = 400,
+				promotionBonus = 125,
+			),
+		).willReturn(expectedGraph)
+
+		val result = boardService.createBoard(request)
+
+		assertThat(result.isSuccess).isTrue()
+		assertThat(result.getOrNull()).isSameAs(expectedGraph)
+	}
+
+	@Test
+	fun `a zero or negative baseSalary is rejected without ever touching the DAO`() {
+		assertThat(boardService.createBoard(validRequest().copy(baseSalary = 0)).isFailure).isTrue()
+		assertThat(boardService.createBoard(validRequest().copy(baseSalary = -1)).isFailure).isTrue()
+		verifyNoInteractions(boardDao)
+	}
+
+	@Test
+	fun `a negative promotionBonus is rejected without ever touching the DAO`() {
+		assertThat(boardService.createBoard(validRequest().copy(promotionBonus = -1)).isFailure).isTrue()
+		verifyNoInteractions(boardDao)
+	}
+
+	@Test
+	fun `a promotionBonus of exactly zero is allowed`() {
+		val request = validRequest().copy(promotionBonus = 0)
+		val expectedGraph = mock(BoardGraph::class.java)
+
+		val expectedSpaceInputs = request.spaces.map { BoardDao.SpaceInput(it.spaceType) }
+		val expectedPathInputs = request.paths.map { BoardDao.PathInput(it.from, it.to, it.branchOrder) }
+
+		given(
+			boardDao.create(
+				name = request.name,
+				spaceInputs = expectedSpaceInputs,
+				pathInputs = expectedPathInputs,
+				startIndex = request.startSpaceIndex,
+				startingGold = request.startingGold,
+				baseSalary = request.baseSalary,
+				promotionBonus = 0,
+			),
+		).willReturn(expectedGraph)
+
+		val result = boardService.createBoard(request)
+
+		assertThat(result.isSuccess).isTrue()
 	}
 
 	// --- listBoards ---

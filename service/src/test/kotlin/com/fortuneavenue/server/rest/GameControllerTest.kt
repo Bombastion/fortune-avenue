@@ -42,6 +42,8 @@ class GameControllerTest : DatabaseTest() {
 			),
 			startSpaceIndex = 0,
 			startingGold = 1000,
+			baseSalary = 200,
+			promotionBonus = 50,
 		),
 	).body!!
 

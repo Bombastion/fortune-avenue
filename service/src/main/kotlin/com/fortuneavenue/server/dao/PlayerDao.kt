@@ -81,21 +81,23 @@ class PlayerDao {
 	}
 
 	/**
-	 * Clears [playerId]'s held suits entirely, but only if they currently hold every one of
-	 * [requiredSuits] -- a promotion trigger (see GameSimulationService, which drives this
-	 * whenever a player passes or lands on a BANK space). Returns whether they actually held
-	 * every suit (and so were cleared) -- a player missing even one is left untouched -- or null
-	 * if the player has no state at all.
+	 * Clears [playerId]'s held suits entirely -- whether they actually held any is entirely the
+	 * caller's concern (see GameSimulationService, which only calls this once it's already
+	 * decided a BANK promotion happened). Returns the updated state, or null if the player has
+	 * no state at all.
 	 */
-	fun clearHeldSuitsIfComplete(playerId: Uuid, requiredSuits: Set<SpaceType>): Boolean? = transaction {
-		val state = findStateEntity(playerId) ?: return@transaction null
+	fun clearHeldSuits(playerId: Uuid): PlayerState? = transaction {
+		findStateEntity(playerId)?.apply { heldSuits = emptyList() }
+	}
 
-		if (requiredSuits.all { it.name in state.heldSuits }) {
-			state.heldSuits = emptyList()
-			true
-		} else {
-			false
-		}
+	/**
+	 * Adds 1 to [playerId]'s promotionCount -- see GameSimulationService, which drives this
+	 * every time a BANK promotion happens, after already having read the pre-increment value as
+	 * that promotion's "level" (see PlayerStatesTable.promotionCount). Returns the updated
+	 * state, or null if the player has no state at all.
+	 */
+	fun incrementPromotionCount(playerId: Uuid): PlayerState? = transaction {
+		findStateEntity(playerId)?.apply { promotionCount += 1 }
 	}
 
 	// Not itself wrapped in a transaction -- only ever called from within one

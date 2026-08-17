@@ -32,9 +32,10 @@ private data class Connection(val gameId: Uuid, val playerId: Uuid)
  * the `player_moved` event for that space (nothing is broadcast for a suit
  * already held). The same space is also checked for a `promoted` event --
  * passing or landing on a BANK space while currently holding all 4 suits
- * clears them all, broadcast right after that space's `player_moved` event
- * (nothing is broadcast for a BANK space visited without every suit in
- * hand). If that movement reaches a space with more than one path
+ * clears them all, bumps a promotion count, and pays out gold (named in the
+ * event as `goldAwarded`), broadcast right after that space's
+ * `player_moved` event (nothing is broadcast for a BANK space visited
+ * without every suit in hand). If that movement reaches a space with more than one path
  * out of it, it pauses there and a `choice_required` event lists the
  * options -- respond with `{"type":"choose_path","spaceId":"<id>"}` to pick
  * one and keep moving. If movement instead runs out on an unowned shop, it
@@ -187,6 +188,7 @@ class GameWebSocketHandler(
 		is GameSimulationService.TurnEvent.Promoted -> PromotedEvent(
 			playerId = playerId.toString(),
 			spaceId = spaceId.toString(),
+			goldAwarded = goldAwarded,
 		)
 		is GameSimulationService.TurnEvent.ChoiceRequired -> ChoiceRequiredEvent(
 			playerId = playerId.toString(),

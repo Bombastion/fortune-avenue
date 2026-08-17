@@ -61,6 +61,18 @@ class GameShopInformationDao {
 	}
 
 	/**
+	 * Every shop [playerId] owns in [gameId], across every district (or none) -- see
+	 * GameSimulationService's BANK promotion payout, which sums these shops' currentValue.
+	 * Unlike [findOwnedByPlayerInDistrict], not scoped to a single district.
+	 */
+	fun findOwnedByPlayer(gameId: Uuid, playerId: Uuid): List<GameShopInformation> = transaction {
+		GameShopInformation.find {
+			(GameShopInformationTable.gameId eq EntityID(gameId, GamesTable)) and
+				(GameShopInformationTable.ownerId eq EntityID(playerId, PlayersTable))
+		}.toList()
+	}
+
+	/**
 	 * Every shop in [districtId], regardless of owner (or lack of one)
 	 */
 	fun findByGameAndDistrict(gameId: Uuid, districtId: EntityID<Uuid>): List<GameShopInformation> = transaction {

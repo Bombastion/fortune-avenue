@@ -65,12 +65,24 @@ data class CreateDistrictRequest(
 	val progressions: List<CreateDistrictProgressionRequest> = emptyList(),
 )
 
-/** [startingGold] must be a positive integer -- see [BoardService]. Every player in a game on this board starts with this much. */
+/**
+ * [startingGold] must be a positive integer -- see [BoardService]. Every player in a game on this
+ * board starts with this much.
+ *
+ * [baseSalary] and [promotionBonus] are the B and P terms of the BANK promotion payout formula
+ * (see [com.fortuneavenue.server.service.GameSimulationService]): a player crossing/landing on a
+ * BANK space while holding all 4 suits is paid baseSalary + (promotionBonus * however many times
+ * they've already collected the promotion this game) + the value of every shop they own.
+ * [baseSalary] must be a positive integer; [promotionBonus] must be zero or a positive integer --
+ * see [BoardService].
+ */
 data class CreateBoardRequest(
 	val name: String,
 	val spaces: List<CreateBoardSpaceRequest>,
 	val paths: List<CreateBoardPathRequest>,
 	val startSpaceIndex: Int,
 	val startingGold: Int,
+	val baseSalary: Int,
+	val promotionBonus: Int,
 	val districts: List<CreateDistrictRequest> = emptyList(),
 )

@@ -46,6 +46,8 @@ class BoardControllerTest : DatabaseTest() {
 		),
 		startSpaceIndex = 0,
 		startingGold = 1000,
+		baseSalary = 200,
+		promotionBonus = 50,
 	)
 
 	@Test
@@ -62,11 +64,33 @@ class BoardControllerTest : DatabaseTest() {
 		assertThat(body.paths).hasSize(3)
 		assertThat(body.spaces.map { it.id }).contains(body.startSpaceId)
 		assertThat(body.startingGold).isEqualTo(1000)
+		assertThat(body.baseSalary).isEqualTo(200)
+		assertThat(body.promotionBonus).isEqualTo(50)
 	}
 
 	@Test
 	fun `creating a board with a zero or negative startingGold returns 400`() {
 		val request = validRequest("bad-gold-${Uuid.random()}").copy(startingGold = 0)
+
+		val response = restTemplate.postForEntity<ErrorResponse>("/boards", request)
+
+		assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
+		assertThat(response.body?.message).isNotBlank()
+	}
+
+	@Test
+	fun `creating a board with a zero or negative baseSalary returns 400`() {
+		val request = validRequest("bad-base-salary-${Uuid.random()}").copy(baseSalary = 0)
+
+		val response = restTemplate.postForEntity<ErrorResponse>("/boards", request)
+
+		assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
+		assertThat(response.body?.message).isNotBlank()
+	}
+
+	@Test
+	fun `creating a board with a negative promotionBonus returns 400`() {
+		val request = validRequest("bad-promotion-bonus-${Uuid.random()}").copy(promotionBonus = -1)
 
 		val response = restTemplate.postForEntity<ErrorResponse>("/boards", request)
 
