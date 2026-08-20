@@ -221,4 +221,24 @@ class GameDistrictInformationDaoTest : DatabaseTest() {
             )
             .isEqualTo(75)
     }
+
+    @Test
+    fun `setCurrentStockValue persists the given value, and null for a row that doesn't exist`() {
+        val boardGraph = createBoardWithShops()
+        val gameId = createGameId(boardGraph.board.id.value)
+        val seededShops = gameShopInformationDao.seedForGame(gameId, boardGraph)
+        val seeded = gameDistrictInformationDao.seedForGame(gameId, boardGraph, seededShops)
+        val redInfo = seeded.single()
+
+        val updated = gameDistrictInformationDao.setCurrentStockValue(redInfo.id.value, 999)
+
+        assertThat(updated?.currentStockValue).isEqualTo(999)
+        assertThat(
+                gameDistrictInformationDao
+                    .findByGameAndDistrict(gameId, redInfo.districtId.value)
+                    ?.currentStockValue
+            )
+            .isEqualTo(999)
+        assertThat(gameDistrictInformationDao.setCurrentStockValue(Uuid.random(), 1)).isNull()
+    }
 }

@@ -80,6 +80,17 @@ class GameDistrictInformationDao {
         info.apply { currentStockValue = computeCurrentStockValue(shops, minimumStockPercentage) }
     }
 
+    /**
+     * Persists [currentStockValue] as [id]'s current_stock_value, e.g. after
+     * GameSimulationService works out a post-trade price fluctuation.
+     */
+    fun setCurrentStockValue(id: Uuid, currentStockValue: Int): GameDistrictInformation? =
+        transaction {
+            GameDistrictInformation.findById(id)?.apply {
+                this.currentStockValue = currentStockValue
+            }
+        }
+
     fun findByGameAndDistrict(gameId: Uuid, districtId: Uuid): GameDistrictInformation? =
         transaction {
             GameDistrictInformation.find {
