@@ -161,14 +161,21 @@ class GameSimulationServiceTest {
         return shop
     }
 
+    /**
+     * [minimumStockPercentage] defaults to an arbitrary mid-range value so existing tests don't
+     * have to think about it unless they're actually testing [GameSimulationService]'s stock price
+     * fluctuation, which reads it to work out a district's price floor.
+     */
     private fun mockDistrictInfo(
         districtId: Uuid,
         currentStockValue: Int,
+        minimumStockPercentage: BigDecimal = BigDecimal("0.5000"),
     ): GameDistrictInformation {
         val info = mock(GameDistrictInformation::class.java)
         lenient().`when`(info.id).thenReturn(EntityID(Uuid.random(), GameDistrictInformationTable))
         lenient().`when`(info.districtId).thenReturn(EntityID(districtId, DistrictsTable))
         lenient().`when`(info.currentStockValue).thenReturn(currentStockValue)
+        lenient().`when`(info.minimumStockPercentage).thenReturn(minimumStockPercentage)
         return info
     }
 
@@ -1426,11 +1433,11 @@ class GameSimulationServiceTest {
         given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
 
         // 11 shares is more than the 10-share threshold -- unlike the 10-share purchase above,
-        // this one should also nudge the district's price.
+        // this one should also nudge the district's price up: 50 / 16 = 3 (rounded down), + 1 = 4,
+        // so 50 -> 54 (well above the floor of average(100) * 0.5 = 50).
         service.buyStock(gameId, playerId, districtId, 11)
 
-        verify(gameDistrictInformationDao)
-            .adjustStockValueForTrade(gameId, districtInfo.districtId, shops, true)
+        verify(gameDistrictInformationDao).setCurrentStockValue(districtInfo.id.value, 54)
     }
 
     @Test
@@ -1462,7 +1469,7 @@ class GameSimulationServiceTest {
     }
 
     @Test
-    fun `sellStock fluctuates the district's stock price downward when quantity exceeds the threshold`() {
+    fun `sellStock fluctuates the district's stock price downward when there's room above the minimum`() {
         val playerId = Uuid.random()
         val districtId = Uuid.random()
         val bankSpaceId = Uuid.random()
@@ -1476,7 +1483,9 @@ class GameSimulationServiceTest {
         val player = mockPlayer(playerId)
         val districtInfo = mockDistrictInfo(districtId, currentStockValue = 40)
         val ownedStock = mockPlayerStock(quantity = 20)
-        val shops = listOf(mockShop(Uuid.random(), currentValue = 80, districtId = districtId))
+        // A low shop value keeps the floor (average(10) * 0.5 = 5) well out of the way, so the
+        // fluctuation isn't clamped -- see the dedicated floor test below for that case.
+        val shops = listOf(mockShop(Uuid.random(), currentValue = 10, districtId = districtId))
         val advancedGame = mockGame(turnOrder = listOf(playerId), turnNumber = 1)
         given(gameDao.findById(gameId)).willReturn(game)
         given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
@@ -1488,11 +1497,43 @@ class GameSimulationServiceTest {
         given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
 
         // 15 shares is more than the 10-share threshold -- this one should nudge the district's
-        // price down, unlike a sale of 10 shares or fewer.
+        // price down: 40 / 16 = 2 (rounded down), + 1 = 3, so 40 -> 37.
         service.sellStock(gameId, playerId, districtId, 15)
 
-        verify(gameDistrictInformationDao)
-            .adjustStockValueForTrade(gameId, districtInfo.districtId, shops, false)
+        verify(gameDistrictInformationDao).setCurrentStockValue(districtInfo.id.value, 37)
+    }
+
+    @Test
+    fun `sellStock never drops the district's stock price below its current minimum`() {
+        val playerId = Uuid.random()
+        val districtId = Uuid.random()
+        val bankSpaceId = Uuid.random()
+        val game =
+            mockGame(
+                turnOrder = listOf(playerId),
+                turnNumber = 0,
+                currentMovementPoints = 0,
+                pendingStockTradeSpaceId = bankSpaceId,
+            )
+        val player = mockPlayer(playerId)
+        val districtInfo = mockDistrictInfo(districtId, currentStockValue = 40)
+        val ownedStock = mockPlayerStock(quantity = 20)
+        // average(80) * 0.5 = 40 -- exactly what an unclamped fluctuation (40 - (40 / 16 + 1) =
+        // 37) would otherwise fall below.
+        val shops = listOf(mockShop(Uuid.random(), currentValue = 80, districtId = districtId))
+        val advancedGame = mockGame(turnOrder = listOf(playerId), turnNumber = 1)
+        given(gameDao.findById(gameId)).willReturn(game)
+        given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
+        given(gameDistrictInformationDao.findByGameAndDistrict(gameId, districtId))
+            .willReturn(districtInfo)
+        given(playerStockDao.find(playerId, districtInfo.id.value)).willReturn(ownedStock)
+        given(gameShopInformationDao.findByGameAndDistrict(gameId, districtInfo.districtId))
+            .willReturn(shops)
+        given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
+
+        service.sellStock(gameId, playerId, districtId, 15)
+
+        verify(gameDistrictInformationDao).setCurrentStockValue(districtInfo.id.value, 40)
     }
 
     @Test

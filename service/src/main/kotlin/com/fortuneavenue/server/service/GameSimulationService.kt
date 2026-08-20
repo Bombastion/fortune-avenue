@@ -8,6 +8,7 @@ import com.fortuneavenue.server.dao.PlayerDao
 import com.fortuneavenue.server.dao.PlayerStockDao
 import com.fortuneavenue.server.models.board.db.BoardGraph
 import com.fortuneavenue.server.models.board.db.BoardPath
+import com.fortuneavenue.server.models.board.db.GameDistrictInformation
 import com.fortuneavenue.server.models.board.db.GameShopInformation
 import com.fortuneavenue.server.models.board.db.SpaceType
 import com.fortuneavenue.server.models.game.db.Game
@@ -16,7 +17,6 @@ import com.fortuneavenue.server.models.player.db.PlayerStatus
 import java.math.BigDecimal
 import java.math.RoundingMode
 import kotlin.uuid.Uuid
-import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.springframework.stereotype.Service
 
 /**
@@ -905,7 +905,7 @@ class GameSimulationService(
         playerDao.adjustGold(playerId, -totalCost)
         playerStockDao.adjustQuantity(playerId, info.id.value, quantity)
         if (quantity > STOCK_FLUCTUATION_THRESHOLD) {
-            fluctuateStockPrice(gameId, info.districtId, isBuy = true)
+            fluctuateStockPrice(gameId, info, isBuy = true)
         }
         return Result.success(
             TurnEvent.StockPurchased(playerId, districtId, quantity, pricePerShare, totalCost)
@@ -954,7 +954,7 @@ class GameSimulationService(
         playerDao.adjustGold(playerId, totalProceeds)
         playerStockDao.adjustQuantity(playerId, info.id.value, -quantity)
         if (quantity > STOCK_FLUCTUATION_THRESHOLD) {
-            fluctuateStockPrice(gameId, info.districtId, isBuy = false)
+            fluctuateStockPrice(gameId, info, isBuy = false)
         }
         return Result.success(
             TurnEvent.StockSold(playerId, districtId, quantity, pricePerShare, totalProceeds)
@@ -962,14 +962,51 @@ class GameSimulationService(
     }
 
     /**
-     * Moves [districtId]'s stock price after a trade of more than [STOCK_FLUCTUATION_THRESHOLD]
-     * shares at once -- see GameDistrictInformationDao.adjustStockValueForTrade for the actual
-     * formula and floor. [executeBuyStock]/[executeSellStock] are the only callers, and only when
-     * that threshold is crossed.
+     * Works out and persists [info]'s post-trade stock price, for a trade of more than
+     * [STOCK_FLUCTUATION_THRESHOLD] shares at once -- [executeBuyStock]/[executeSellStock] are the
+     * only callers, and only once that threshold is crossed. Moves [info]'s currentStockValue by
+     * its own pre-trade value divided by [STOCK_FLUCTUATION_DIVISOR] (rounded down), plus 1 -- up
+     * for a buy ([isBuy] true), down for a sell -- but never lets a sell push it below the
+     * district's minimum: current_stock_value recomputed fresh from [info]'s district's current
+     * shops via [averageStockValue] (the same formula
+     * GameDistrictInformationDao.recalculateCurrentStockValue uses), since shop values -- and so
+     * this floor -- can rise over the course of a game via district value progressions. The
+     * decision lives here rather than on GameDistrictInformationDao, which just persists whatever
+     * price this settles on (see GameDistrictInformationDao.setCurrentStockValue).
      */
-    private fun fluctuateStockPrice(gameId: Uuid, districtId: EntityID<Uuid>, isBuy: Boolean) {
-        val shops = gameShopInformationDao.findByGameAndDistrict(gameId, districtId)
-        gameDistrictInformationDao.adjustStockValueForTrade(gameId, districtId, shops, isBuy)
+    private fun fluctuateStockPrice(gameId: Uuid, info: GameDistrictInformation, isBuy: Boolean) {
+        val shops = gameShopInformationDao.findByGameAndDistrict(gameId, info.districtId)
+        val delta = info.currentStockValue / STOCK_FLUCTUATION_DIVISOR + 1
+        val fluctuated =
+            if (isBuy) info.currentStockValue + delta else info.currentStockValue - delta
+        val minimum =
+            if (shops.isEmpty()) info.currentStockValue
+            else averageStockValue(shops, info.minimumStockPercentage)
+
+        gameDistrictInformationDao.setCurrentStockValue(info.id.value, maxOf(fluctuated, minimum))
+    }
+
+    /**
+     * The average currentValue of [shops], multiplied by [minimumStockPercentage] and rounded to
+     * the nearest whole gold -- a district's current_stock_value floor (see [fluctuateStockPrice]).
+     * Mirrors GameDistrictInformationDao's own private seeding/recalculation formula; kept as a
+     * separate copy here rather than shared so that DAO stays limited to querying and persisting,
+     * not deciding prices.
+     */
+    private fun averageStockValue(
+        shops: List<GameShopInformation>,
+        minimumStockPercentage: BigDecimal,
+    ): Int {
+        val average =
+            shops
+                .sumOf { it.currentValue }
+                .toBigDecimal()
+                .divide(
+                    shops.size.toBigDecimal(),
+                    STOCK_AVERAGE_INTERMEDIATE_SCALE,
+                    RoundingMode.HALF_UP,
+                )
+        return (average * minimumStockPercentage).setScale(0, RoundingMode.HALF_UP).toInt()
     }
 
     /**
@@ -1303,6 +1340,15 @@ class GameSimulationService(
         // Above this many shares in one buy or sell, the trade also moves the district's stock
         // price -- see [fluctuateStockPrice].
         private const val STOCK_FLUCTUATION_THRESHOLD = 10
+
+        // A trade's price fluctuation moves current_stock_value by this fraction of its own
+        // pre-trade value, rounded down, plus 1 -- see [fluctuateStockPrice].
+        private const val STOCK_FLUCTUATION_DIVISOR = 16
+
+        // Intermediate scale used only while dividing to compute an average -- rounded away again
+        // once the result is derived, so this just needs to be generous enough not to lose
+        // precision along the way. See [averageStockValue].
+        private const val STOCK_AVERAGE_INTERMEDIATE_SCALE = 10
         private val SUIT_SPACE_TYPES =
             setOf(SpaceType.HEART, SpaceType.DIAMOND, SpaceType.SPADE, SpaceType.CLUB)
     }
