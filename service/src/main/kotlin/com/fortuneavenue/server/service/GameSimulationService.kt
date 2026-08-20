@@ -16,6 +16,7 @@ import com.fortuneavenue.server.models.player.db.PlayerStatus
 import java.math.BigDecimal
 import java.math.RoundingMode
 import kotlin.uuid.Uuid
+import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.springframework.stereotype.Service
 
 /**
@@ -862,8 +863,10 @@ class GameSimulationService(
     /**
      * Buys [quantity] shares (1-99) of [districtId]'s stock for [playerId], at that district's
      * current_stock_value per share -- paid out of their gold, which must cover the full quantity *
-     * price up front; fails outright otherwise, exactly like [buyShop]. Shared by the human-facing
-     * [buyStock] and a computer player's automatic decision in [checkStockTrade].
+     * price up front; fails outright otherwise, exactly like [buyShop]. A quantity over
+     * [STOCK_FLUCTUATION_THRESHOLD] also nudges the district's price up afterward -- see
+     * [fluctuateStockPrice]. Shared by the human-facing [buyStock] and a computer player's automatic
+     * decision in [checkStockTrade].
      */
     private fun executeBuyStock(
         gameId: Uuid,
@@ -886,7 +889,8 @@ class GameSimulationService(
                     )
                 )
 
-        val totalCost = info.currentStockValue * quantity
+        val pricePerShare = info.currentStockValue
+        val totalCost = pricePerShare * quantity
         val gold =
             currentGold(playerId)
                 ?: return Result.failure(InvalidPlayerException("Player $playerId has no state."))
@@ -900,22 +904,20 @@ class GameSimulationService(
 
         playerDao.adjustGold(playerId, -totalCost)
         playerStockDao.adjustQuantity(playerId, info.id.value, quantity)
+        if (quantity > STOCK_FLUCTUATION_THRESHOLD) {
+            fluctuateStockPrice(gameId, info.districtId, isBuy = true)
+        }
         return Result.success(
-            TurnEvent.StockPurchased(
-                playerId,
-                districtId,
-                quantity,
-                info.currentStockValue,
-                totalCost,
-            )
+            TurnEvent.StockPurchased(playerId, districtId, quantity, pricePerShare, totalCost)
         )
     }
 
     /**
      * Sells [quantity] shares (1-99) of [districtId]'s stock [playerId] currently holds, at that
      * district's current_stock_value per share -- credited to their gold. Can't sell more than
-     * currently held; fails outright otherwise. Shared by the human-facing [sellStock] and a
-     * computer player's automatic decision in [checkStockTrade].
+     * currently held; fails outright otherwise. A quantity over [STOCK_FLUCTUATION_THRESHOLD] also
+     * nudges the district's price down afterward -- see [fluctuateStockPrice]. Shared by the
+     * human-facing [sellStock] and a computer player's automatic decision in [checkStockTrade].
      */
     private fun executeSellStock(
         gameId: Uuid,
@@ -947,18 +949,27 @@ class GameSimulationService(
             )
         }
 
-        val totalProceeds = info.currentStockValue * quantity
+        val pricePerShare = info.currentStockValue
+        val totalProceeds = pricePerShare * quantity
         playerDao.adjustGold(playerId, totalProceeds)
         playerStockDao.adjustQuantity(playerId, info.id.value, -quantity)
+        if (quantity > STOCK_FLUCTUATION_THRESHOLD) {
+            fluctuateStockPrice(gameId, info.districtId, isBuy = false)
+        }
         return Result.success(
-            TurnEvent.StockSold(
-                playerId,
-                districtId,
-                quantity,
-                info.currentStockValue,
-                totalProceeds,
-            )
+            TurnEvent.StockSold(playerId, districtId, quantity, pricePerShare, totalProceeds)
         )
+    }
+
+    /**
+     * Moves [districtId]'s stock price after a trade of more than [STOCK_FLUCTUATION_THRESHOLD]
+     * shares at once -- see GameDistrictInformationDao.adjustStockValueForTrade for the actual
+     * formula and floor. [executeBuyStock]/[executeSellStock] are the only callers, and only when
+     * that threshold is crossed.
+     */
+    private fun fluctuateStockPrice(gameId: Uuid, districtId: EntityID<Uuid>, isBuy: Boolean) {
+        val shops = gameShopInformationDao.findByGameAndDistrict(gameId, districtId)
+        gameDistrictInformationDao.adjustStockValueForTrade(gameId, districtId, shops, isBuy)
     }
 
     /**
@@ -1288,6 +1299,10 @@ class GameSimulationService(
         private const val MIN_SHOPS_OWNED_TO_RECALCULATE = 2
         private const val MIN_STOCK_TRADE_QUANTITY = 1
         private const val MAX_STOCK_TRADE_QUANTITY = 99
+
+        // Above this many shares in one buy or sell, the trade also moves the district's stock
+        // price -- see [fluctuateStockPrice].
+        private const val STOCK_FLUCTUATION_THRESHOLD = 10
         private val SUIT_SPACE_TYPES =
             setOf(SpaceType.HEART, SpaceType.DIAMOND, SpaceType.SPADE, SpaceType.CLUB)
     }

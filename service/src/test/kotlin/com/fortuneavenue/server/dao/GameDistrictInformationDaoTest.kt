@@ -221,4 +221,100 @@ class GameDistrictInformationDaoTest : DatabaseTest() {
             )
             .isEqualTo(75)
     }
+
+    @Test
+    fun `adjustStockValueForTrade moves the price up for a buy, by pre-trade value divided by 16 rounded down plus 1`() {
+        val boardGraph = createBoardWithShops()
+        val gameId = createGameId(boardGraph.board.id.value)
+        val seededShops = gameShopInformationDao.seedForGame(gameId, boardGraph)
+        gameDistrictInformationDao.seedForGame(gameId, boardGraph, seededShops)
+        val redDistrict = boardGraph.districts.single { it.name == "Red" }
+        val shops = gameShopInformationDao.findByGameAndDistrict(gameId, redDistrict.id)
+
+        // Seeded currentStockValue is 75 (see the seedForGame test above); 75 / 16 = 4 (rounded
+        // down), + 1 = 5, so a buy should land on 80.
+        val updated =
+            gameDistrictInformationDao.adjustStockValueForTrade(
+                gameId,
+                redDistrict.id,
+                shops,
+                isBuy = true,
+            )
+
+        assertThat(updated?.currentStockValue).isEqualTo(80)
+        assertThat(
+                gameDistrictInformationDao
+                    .findByGameAndDistrict(gameId, redDistrict.id.value)
+                    ?.currentStockValue
+            )
+            .isEqualTo(80)
+    }
+
+    @Test
+    fun `adjustStockValueForTrade moves the price down for a sell, when there's room above the minimum`() {
+        val boardGraph = createBoardWithShops()
+        val gameId = createGameId(boardGraph.board.id.value)
+        val seededShops = gameShopInformationDao.seedForGame(gameId, boardGraph)
+        gameDistrictInformationDao.seedForGame(gameId, boardGraph, seededShops)
+        val redDistrict = boardGraph.districts.single { it.name == "Red" }
+        val shops = gameShopInformationDao.findByGameAndDistrict(gameId, redDistrict.id)
+
+        // Two buys first, to lift the price well above the minimum (still average(100, 200) * 0.5
+        // = 75, since neither buy touches the shops themselves) before selling back down:
+        // 75 -> (+5) -> 80 -> (+5) -> 86 -> (-6) -> 80. Each step's delta is that step's starting
+        // value / 16 (rounded down) + 1.
+        gameDistrictInformationDao.adjustStockValueForTrade(gameId, redDistrict.id, shops, true)
+        gameDistrictInformationDao.adjustStockValueForTrade(gameId, redDistrict.id, shops, true)
+
+        val updated =
+            gameDistrictInformationDao.adjustStockValueForTrade(
+                gameId,
+                redDistrict.id,
+                shops,
+                isBuy = false,
+            )
+
+        assertThat(updated?.currentStockValue).isEqualTo(80)
+    }
+
+    @Test
+    fun `adjustStockValueForTrade never sells the price below the district's current minimum`() {
+        val boardGraph = createBoardWithShops()
+        val gameId = createGameId(boardGraph.board.id.value)
+        val seededShops = gameShopInformationDao.seedForGame(gameId, boardGraph)
+        gameDistrictInformationDao.seedForGame(gameId, boardGraph, seededShops)
+        val redDistrict = boardGraph.districts.single { it.name == "Red" }
+        val shops = gameShopInformationDao.findByGameAndDistrict(gameId, redDistrict.id)
+
+        // Seeded currentStockValue (75) already equals the minimum (average(100, 200) * 0.5) --
+        // a sell would otherwise drop it to 75 - (75 / 16 + 1) = 70, below that floor.
+        val updated =
+            gameDistrictInformationDao.adjustStockValueForTrade(
+                gameId,
+                redDistrict.id,
+                shops,
+                isBuy = false,
+            )
+
+        assertThat(updated?.currentStockValue).isEqualTo(75)
+    }
+
+    @Test
+    fun `adjustStockValueForTrade returns null for a district with no seeded row`() {
+        val boardGraph = createBoardWithShops()
+        val gameId = createGameId(boardGraph.board.id.value)
+        val seededShops = gameShopInformationDao.seedForGame(gameId, boardGraph)
+        gameDistrictInformationDao.seedForGame(gameId, boardGraph, seededShops)
+        val blueDistrict = boardGraph.districts.single { it.name == "Blue" }
+
+        val result =
+            gameDistrictInformationDao.adjustStockValueForTrade(
+                gameId,
+                blueDistrict.id,
+                emptyList(),
+                isBuy = true,
+            )
+
+        assertThat(result).isNull()
+    }
 }

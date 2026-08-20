@@ -20,6 +20,10 @@ import org.springframework.stereotype.Repository
 // along the way.
 private const val AVERAGE_INTERMEDIATE_SCALE = 10
 
+// A trade's price fluctuation (see [GameDistrictInformationDao.adjustStockValueForTrade]) moves
+// current_stock_value by this fraction of its own pre-trade value, rounded down, plus 1.
+private const val STOCK_FLUCTUATION_DIVISOR = 16
+
 @Repository
 class GameDistrictInformationDao {
 
@@ -78,6 +82,40 @@ class GameDistrictInformationDao {
                 .firstOrNull() ?: return@transaction null
 
         info.apply { currentStockValue = computeCurrentStockValue(shops, minimumStockPercentage) }
+    }
+
+    /**
+     * Applies a stock price fluctuation to [districtId]'s current_stock_value in [gameId], triggered
+     * by a trade of more than 10 shares at once -- the only two callers,
+     * GameSimulationService.executeBuyStock/executeSellStock, enforce that threshold themselves.
+     * Moves the price by its own pre-trade value divided by [STOCK_FLUCTUATION_DIVISOR] (rounded
+     * down), plus 1 -- up for a buy ([isBuy] true), down for a sell. A sell is never allowed to push
+     * the price below the district's minimum: current_stock_value recomputed fresh from [shops] and
+     * minimumStockPercentage, the same formula [recalculateCurrentStockValue] uses, since shop
+     * values (and so this floor) can rise over the course of a game via district value
+     * progressions. A no-op (returns null) if [districtId] has no seeded row.
+     */
+    fun adjustStockValueForTrade(
+        gameId: Uuid,
+        districtId: EntityID<Uuid>,
+        shops: List<GameShopInformation>,
+        isBuy: Boolean,
+    ): GameDistrictInformation? = transaction {
+        val info =
+            GameDistrictInformation.find {
+                    (GameDistrictInformationTable.gameId eq EntityID(gameId, GamesTable)) and
+                        (GameDistrictInformationTable.districtId eq districtId)
+                }
+                .firstOrNull() ?: return@transaction null
+
+        val delta = info.currentStockValue / STOCK_FLUCTUATION_DIVISOR + 1
+        val fluctuated =
+            if (isBuy) info.currentStockValue + delta else info.currentStockValue - delta
+        val minimum =
+            if (shops.isEmpty()) info.currentStockValue
+            else computeCurrentStockValue(shops, info.minimumStockPercentage)
+
+        info.apply { currentStockValue = maxOf(fluctuated, minimum) }
     }
 
     fun findByGameAndDistrict(gameId: Uuid, districtId: Uuid): GameDistrictInformation? =
