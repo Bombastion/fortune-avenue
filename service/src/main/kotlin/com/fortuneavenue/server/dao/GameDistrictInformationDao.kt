@@ -81,9 +81,8 @@ class GameDistrictInformationDao {
     }
 
     /**
-     * Persists [currentStockValue] as [id]'s current_stock_value -- e.g. after
-     * GameSimulationService works out a post-trade price fluctuation. Mirrors
-     * GameShopInformationDao.setCurrentValue. A no-op (returns null) if [id] doesn't exist.
+     * Persists [currentStockValue] as [id]'s current_stock_value, e.g. after
+     * GameSimulationService works out a post-trade price fluctuation.
      */
     fun setCurrentStockValue(id: Uuid, currentStockValue: Int): GameDistrictInformation? =
         transaction {
