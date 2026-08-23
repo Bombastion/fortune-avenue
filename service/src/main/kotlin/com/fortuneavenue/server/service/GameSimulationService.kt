@@ -16,6 +16,7 @@ import com.fortuneavenue.server.models.player.db.Player
 import com.fortuneavenue.server.models.player.db.PlayerStatus
 import java.math.BigDecimal
 import java.math.RoundingMode
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.uuid.Uuid
 import org.springframework.stereotype.Service
 
@@ -80,6 +81,15 @@ class GameSimulationService(
     private val dice: Dice,
     private val computerPlayer: ComputerPlayer,
 ) {
+
+    // Guards the "has this game already started?" read-then-write in [markReady] against two
+    // players readying up (and racing to start the game / seed its shop+district info) at nearly
+    // the same instant -- each ready message is handled on its own thread, and neither
+    // GameDao.startGame nor the turnOrder check above it is otherwise atomic across threads.
+    // Keyed per game so unrelated games never contend with each other. In-memory only, which is
+    // fine: like GameWebSocketHandler's session bookkeeping, this only ever needs to coordinate
+    // within a single server instance (see GameWebSocketHandler's class doc).
+    private val gameStartLocks = ConcurrentHashMap<Uuid, Any>()
 
     sealed interface ReadyOutcome {
         /** Marked ready, but not every player is (or the game already started). */
@@ -232,61 +242,68 @@ class GameSimulationService(
         ) : TurnEvent
     }
 
-    fun markReady(gameId: Uuid, playerId: Uuid): Result<ReadyOutcome> {
-        val game =
-            gameDao.findById(gameId)
-                ?: return Result.failure(GameNotFoundException("Game $gameId does not exist."))
-        val players = playerDao.findByGameId(gameId)
-        if (players.none { it.id.value == playerId }) {
-            return Result.failure(
-                InvalidPlayerException("Player $playerId is not in game $gameId.")
-            )
-        }
-
-        playerDao.updateStatus(playerId, PlayerStatus.READY)
-
-        // Turn order is only ever decided once -- a player readying up again
-        // after the game has already started (e.g. on reconnect) shouldn't
-        // re-shuffle it.
-        if (game.turnOrder != null) return Result.success(ReadyOutcome.Waiting)
-
-        val (computerPlayers, humanPlayers) = players.partition { it.userId == null }
-        val allHumansReady = humanPlayers.all { player ->
-            val status =
-                if (player.id.value == playerId) PlayerStatus.READY
-                else playerDao.findState(player.id.value)?.status
-            status == PlayerStatus.READY
-        }
-        if (!allHumansReady) return Result.success(ReadyOutcome.Waiting)
-
-        // Nobody's connected to ready a computer player up themselves -- now
-        // that every human is ready, do it for them so the game can start.
-        computerPlayers.forEach { playerDao.updateStatus(it.id.value, PlayerStatus.READY) }
-
-        val turnOrder = players.map { it.id.value }.shuffled()
-        val startedGame = gameDao.startGame(gameId, turnOrder)
-
-        // The game only ever starts once (guarded by the turnOrder check above), so this is the
-        // one moment a per-game copy of the board's shops (and each district's stock) needs to be
-        // seeded -- see GameShopInformationDao.seedForGame and
-        // GameDistrictInformationDao.seedForGame.
-        if (startedGame != null) {
-            boardDao.findById(game.boardId.value)?.let { boardGraph ->
-                val seededShops = gameShopInformationDao.seedForGame(gameId, boardGraph)
-                gameDistrictInformationDao.seedForGame(gameId, boardGraph, seededShops)
+    fun markReady(gameId: Uuid, playerId: Uuid): Result<ReadyOutcome> =
+        synchronized(gameStartLocks.computeIfAbsent(gameId) { Any() }) {
+            val game =
+                gameDao.findById(gameId)
+                    ?: return@synchronized Result.failure(
+                        GameNotFoundException("Game $gameId does not exist.")
+                    )
+            val players = playerDao.findByGameId(gameId)
+            if (players.none { it.id.value == playerId }) {
+                return@synchronized Result.failure(
+                    InvalidPlayerException("Player $playerId is not in game $gameId.")
+                )
             }
+
+            playerDao.updateStatus(playerId, PlayerStatus.READY)
+
+            // Turn order is only ever decided once -- a player readying up again
+            // after the game has already started (e.g. on reconnect) shouldn't
+            // re-shuffle it.
+            if (game.turnOrder != null) return@synchronized Result.success(ReadyOutcome.Waiting)
+
+            val (computerPlayers, humanPlayers) = players.partition { it.userId == null }
+            val allHumansReady = humanPlayers.all { player ->
+                val status =
+                    if (player.id.value == playerId) PlayerStatus.READY
+                    else playerDao.findState(player.id.value)?.status
+                status == PlayerStatus.READY
+            }
+            if (!allHumansReady) return@synchronized Result.success(ReadyOutcome.Waiting)
+
+            // Nobody's connected to ready a computer player up themselves -- now
+            // that every human is ready, do it for them so the game can start.
+            computerPlayers.forEach { playerDao.updateStatus(it.id.value, PlayerStatus.READY) }
+
+            val turnOrder = players.map { it.id.value }.shuffled()
+            val startedGame = gameDao.startGame(gameId, turnOrder)
+
+            // The game only ever starts once -- guarded by both the turnOrder check above and the
+            // per-game lock this whole function runs under (the turnOrder check alone isn't
+            // enough: two players readying up close enough together can both read turnOrder as
+            // still null before either's start is visible to the other, and without the lock both
+            // would go on to seed duplicate game_shop_information/game_district_information rows
+            // -- this is the one moment a per-game copy of the board's shops (and each district's
+            // stock) needs to be seeded -- see GameShopInformationDao.seedForGame and
+            // GameDistrictInformationDao.seedForGame.
+            if (startedGame != null) {
+                boardDao.findById(game.boardId.value)?.let { boardGraph ->
+                    val seededShops = gameShopInformationDao.seedForGame(gameId, boardGraph)
+                    gameDistrictInformationDao.seedForGame(gameId, boardGraph, seededShops)
+                }
+            }
+
+            // If the shuffle put one or more computer players at the front,
+            // nobody's ever going to roll the dice to kick things off for them
+            // -- play those turns out right now so the game doesn't stall before
+            // a human even gets a chance to move.
+            val playersById = players.associateBy { it.id.value }
+            val openingTurnEvents =
+                startedGame?.let { playComputerTurns(gameId, it, playersById) }.orEmpty()
+
+            Result.success(ReadyOutcome.GameStarted(turnOrder, openingTurnEvents))
         }
-
-        // If the shuffle put one or more computer players at the front,
-        // nobody's ever going to roll the dice to kick things off for them
-        // -- play those turns out right now so the game doesn't stall before
-        // a human even gets a chance to move.
-        val playersById = players.associateBy { it.id.value }
-        val openingTurnEvents =
-            startedGame?.let { playComputerTurns(gameId, it, playersById) }.orEmpty()
-
-        return Result.success(ReadyOutcome.GameStarted(turnOrder, openingTurnEvents))
-    }
 
     /**
      * Rolls the die for [playerId]'s turn and moves them forward that many spaces -- automatically,
