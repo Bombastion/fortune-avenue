@@ -11,10 +11,6 @@ import org.springframework.stereotype.Repository
 @Repository
 class GameDao {
 
-    /**
-     * [targetNetWorth] is required, not defaulted here -- see GameService.createGame, which is
-     * where the choice of a default (6000) belongs.
-     */
     fun create(boardId: Uuid, targetNetWorth: Int): Game = transaction {
         Game.new {
             this.boardId = EntityID(boardId, BoardsTable)
@@ -58,10 +54,7 @@ class GameDao {
     }
 
     /**
-     * Records the turn number [id] actually ended on. A plain field write -- deciding whether and
-     * when a game has ended is the service layer's job (see
-     * GameSimulationService.endGameIfNetWorthReached and GameSimulationService.isGameOver), not
-     * this DAO's.
+     * Records the turn number [id] actually ended on
      */
     fun setEndedOnTurn(id: Uuid, turnNumber: Int): Game? = transaction {
         Game.findById(id)?.apply { endedOnTurn = turnNumber }
