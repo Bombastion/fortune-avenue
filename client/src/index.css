@@ -1,0 +1,32 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+body {
+  margin: 0;
+  display: flex;
+  justify-content: center;
+  min-height: 100vh;
+}
+
+.app {
+  padding: 3rem 1.5rem;
+  text-align: center;
+}
+
+.status {
+  font-weight: 600;
+}
+
+.status--loading {
+  color: #888;
+}
+
+.status--ok {
+  color: #2ea043;
+}
+
+.status--error {
+  color: #d1242f;
+}

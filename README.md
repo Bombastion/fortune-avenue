@@ -1,8 +1,6 @@
 # Fortune Avenue
 
-A web-based recreation of [Fortune Street](https://en.wikipedia.org/wiki/Fortune_Street), the board game video game that combines Mario-style board gameplay with a stock market/property-trading layer. Fortune Avenue rebuilds it as something playable in the browser.
-
-See [`service/README.md`](service/README.md) for details on how the server works and instructions for common development tasks.
+A web-based recreation of [Fortune Street](https://en.wikipedia.org/wiki/Fortune_Street), the board game video game that combines Mario Party-esque board gameplay with a stock market/property-trading layer. Fortune Avenue rebuilds it as something playable in the browser.
 
 ## Technical details for nerds
 
@@ -10,15 +8,17 @@ If you're curious how things are calculated, I found [this incredibly helpful bl
 
 ### Client
 
-Pending — not started yet. Planning on a React frontend hosted somewhere.
+The client lives in [`client/`](client/) and is a React + TypeScript app built with Vite. It's an early skeleton right now — it calls the backend's `/health` endpoint and shows whether the API is reachable, with real gameplay UI to follow.
+
+See the [client README](client/README.md) for how it fits together with the backend and reverse proxy.
 
 ### Server
 
-The server lives in [`service/`](service/) and is a Kotlin + Spring Boot application. It exposes a WebSocket endpoint for real-time gameplay and a small REST API for everything else, backed by a Postgres database. The whole stack runs in Docker via Docker Compose.
+The server lives in [`service/`](service/) and is a Kotlin + Spring Boot application. It exposes a WebSocket endpoint for real-time gameplay and a small REST API for everything else, backed by a Postgres database. The whole stack — backend, client, Postgres, and an nginx reverse proxy in front of the first two — runs in Docker via Docker Compose.
 
 See the [server README](service/README.md) for details about how the backend works if you're interested.
 
-## Running an example game
+## Running an example game (also for nerds (for now))
 
 This walks through starting the server, setting up a game via REST, and playing it out over the WebSocket endpoint. All commands assume the server is running locally on `localhost:8080` (`make up` from `service/` — see the [server README](service/README.md)).
 
