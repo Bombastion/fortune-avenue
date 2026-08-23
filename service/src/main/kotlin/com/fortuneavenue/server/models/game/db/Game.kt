@@ -15,4 +15,5 @@ class Game(id: EntityID<Uuid>) : UuidEntity(id) {
     var currentMovementPoints by GamesTable.currentMovementPoints
     var pendingStockTradeSpaceId by GamesTable.pendingStockTradeSpaceId
     var targetNetWorth by GamesTable.targetNetWorth
+    var endedOnTurn by GamesTable.endedOnTurn
 }

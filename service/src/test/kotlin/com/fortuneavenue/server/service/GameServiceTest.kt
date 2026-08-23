@@ -31,11 +31,11 @@ class GameServiceTest {
     }
 
     @Test
-    fun `createGame persists a game when the board exists`() {
+    fun `createGame persists a game when the board exists, defaulting targetNetWorth to 6000`() {
         val boardId = Uuid.random()
         given(boardDao.findById(boardId)).willReturn(mock(BoardGraph::class.java))
         val createdGame = mock(Game::class.java)
-        given(gameDao.create(boardId, null)).willReturn(createdGame)
+        given(gameDao.create(boardId, 6000)).willReturn(createdGame)
 
         val result = gameService.createGame(boardId)
 

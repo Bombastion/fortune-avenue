@@ -199,6 +199,7 @@ class GameSimulationServiceTest {
         currentMovementPoints: Int? = null,
         pendingStockTradeSpaceId: Uuid? = null,
         targetNetWorth: Int = 6000,
+        endedOnTurn: Int? = null,
     ): Game {
         val game = mock(Game::class.java)
         lenient().`when`(game.boardId).thenReturn(EntityID(boardId, BoardsTable))
@@ -210,6 +211,7 @@ class GameSimulationServiceTest {
             .`when`(game.pendingStockTradeSpaceId)
             .thenReturn(pendingStockTradeSpaceId?.let { EntityID(it, BoardSpacesTable) })
         lenient().`when`(game.targetNetWorth).thenReturn(targetNetWorth)
+        lenient().`when`(game.endedOnTurn).thenReturn(endedOnTurn)
         return game
     }
 
@@ -1363,7 +1365,7 @@ class GameSimulationServiceTest {
 
         service.buyStock(gameId, playerId, districtId, 10)
 
-        verify(gameDao).endGameEarly(gameId)
+        verify(gameDao).setEndedOnTurn(gameId, 0)
     }
 
     @Test
@@ -2132,7 +2134,7 @@ class GameSimulationServiceTest {
 
         service.buyShop(gameId, playerId)
 
-        verify(gameDao).endGameEarly(gameId)
+        verify(gameDao).setEndedOnTurn(gameId, 0)
     }
 
     @Test
@@ -2159,7 +2161,7 @@ class GameSimulationServiceTest {
 
         service.buyShop(gameId, playerId)
 
-        verify(gameDao, never()).endGameEarly(gameId)
+        verify(gameDao, never()).setEndedOnTurn(gameId, 0)
     }
 
     @Test

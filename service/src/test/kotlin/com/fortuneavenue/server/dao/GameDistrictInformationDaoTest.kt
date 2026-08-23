@@ -68,7 +68,7 @@ class GameDistrictInformationDaoTest : DatabaseTest() {
         )
     }
 
-    private fun createGameId(boardId: Uuid) = gameDao.create(boardId).id.value
+    private fun createGameId(boardId: Uuid) = gameDao.create(boardId, 6000).id.value
 
     @Test
     fun `seedForGame persists one row per district with at least one SHOP space, skipping districts with none`() {

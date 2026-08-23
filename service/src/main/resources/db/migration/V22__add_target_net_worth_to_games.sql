@@ -2,8 +2,9 @@
 -- district's stock they hold, gold on hand excluded -- is checked the moment it could have moved
 -- (see GameSimulationService.endGameIfNetWorthReached): once any player's net worth reaches or
 -- exceeds a game's target_net_worth, the game ends immediately, exactly as it already does once
--- turn_number reaches max_turns. Configurable per game at creation time (see CreateGameRequest),
--- defaulting to 6000.
+-- turn_number reaches max_turns. Configurable per game at creation time (see CreateGameRequest);
+-- GameService.createGame supplies the default of 6000 when none is given, so there's no DB-level
+-- default here.
 ALTER TABLE games
-    ADD COLUMN target_net_worth INT NOT NULL DEFAULT 6000
+    ADD COLUMN target_net_worth INT NOT NULL
         CONSTRAINT chk_games_target_net_worth_positive CHECK (target_net_worth > 0);

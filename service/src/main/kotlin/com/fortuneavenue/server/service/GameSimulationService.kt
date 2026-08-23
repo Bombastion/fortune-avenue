@@ -593,7 +593,7 @@ class GameSimulationService(
                         "Game $gameId hasn't started yet -- not everyone is ready."
                     )
                 )
-        if (game.turnNumber >= game.maxTurns) {
+        if (isGameOver(game)) {
             return Result.failure(InvalidTurnException("Game $gameId is already over."))
         }
 
@@ -792,15 +792,25 @@ class GameSimulationService(
     }
 
     /**
-     * Ends [gameId] early (see [GameDao.endGameEarly]) the moment any of its players' net worth
-     * (see [netWorth]) reaches or exceeds [game]'s targetNetWorth. Only bothers checking when
+     * A game is over once either turnNumber has reached maxTurns, or it was ended early because
+     * some player's net worth reached targetNetWorth (see [endGameIfNetWorthReached]) -- recorded
+     * as [Game.endedOnTurn], which stays null the whole time a game is still in progress.
+     */
+    private fun isGameOver(game: Game): Boolean =
+        game.endedOnTurn != null || game.turnNumber >= game.maxTurns
+
+    /**
+     * Ends [gameId] early -- deciding whether and when to do so is this service's job, not
+     * GameDao's (see [GameDao.setEndedOnTurn]) -- the moment any of its players' net worth (see
+     * [netWorth]) reaches or exceeds [game]'s targetNetWorth. Only bothers checking when
      * [precedingEvents] shows something that could actually have moved a net worth this turn -- a
      * shop purchase, a district value progression, or a stock trade -- so a turn that's just
      * movement, a suit pickup, or a promotion payout (gold only, not counted -- see [netWorth])
      * never touches GameShopInformationDao/PlayerStockDao/GameDistrictInformationDao at all.
      * Checked across every player, not just the one who acted, since a stock trade's price
      * fluctuation (see [fluctuateStockPrice]) can move the value of shares a *different* player
-     * holds. A no-op if nobody has crossed it.
+     * holds. A no-op if nobody has crossed it, or if [game] was already ended -- never overwrites
+     * an already-recorded endedOnTurn.
      */
     private fun endGameIfNetWorthReached(
         gameId: Uuid,
@@ -815,10 +825,11 @@ class GameSimulationService(
                     it is TurnEvent.StockSold
             }
         if (!netWorthMayHaveMoved) return
+        if (game.endedOnTurn != null) return
 
         val playerIds = playerDao.findByGameId(gameId).map { it.id.value }
         if (playerIds.any { netWorth(gameId, it) >= game.targetNetWorth }) {
-            gameDao.endGameEarly(gameId)
+            gameDao.setEndedOnTurn(gameId, game.turnNumber)
         }
     }
 
@@ -841,7 +852,7 @@ class GameSimulationService(
                 TurnEvent.TurnEnded(
                     playerId,
                     game.turnNumber,
-                    gameOver = updatedGame.turnNumber >= updatedGame.maxTurns,
+                    gameOver = isGameOver(updatedGame),
                 )
         return Result.success(MovementResult(events, updatedGame))
     }
@@ -1335,7 +1346,7 @@ class GameSimulationService(
         val events = mutableListOf<TurnEvent>()
         var current = game
 
-        while (current.turnNumber < current.maxTurns) {
+        while (!isGameOver(current)) {
             val turnOrder = current.turnOrder ?: break
             val nextPlayerId = turnOrder[current.turnNumber % turnOrder.size]
             val nextPlayer = playersById[nextPlayerId] ?: break

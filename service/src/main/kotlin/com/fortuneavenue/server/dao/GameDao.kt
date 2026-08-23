@@ -12,13 +12,13 @@ import org.springframework.stereotype.Repository
 class GameDao {
 
     /**
-     * [targetNetWorth], if given, overrides games.target_net_worth's own default (6000) -- see
-     * GamesTable.
+     * [targetNetWorth] is required, not defaulted here -- see GameService.createGame, which is
+     * where the choice of a default (6000) belongs.
      */
-    fun create(boardId: Uuid, targetNetWorth: Int? = null): Game = transaction {
+    fun create(boardId: Uuid, targetNetWorth: Int): Game = transaction {
         Game.new {
             this.boardId = EntityID(boardId, BoardsTable)
-            if (targetNetWorth != null) this.targetNetWorth = targetNetWorth
+            this.targetNetWorth = targetNetWorth
         }
     }
 
@@ -58,14 +58,12 @@ class GameDao {
     }
 
     /**
-     * Ends [id] immediately by fast-forwarding turn_number to (at least) max_turns -- used the
-     * moment any player's net worth reaches or exceeds target_net_worth (see
-     * GameSimulationService.endGameIfNetWorthReached), so every place that already treats
-     * turn_number >= max_turns as "the game is over" (currentTurnGame, playComputerTurns, endTurn)
-     * picks this up for free, with no separate game-over signal to keep in sync. maxOf guards
-     * against lowering turn_number if this is somehow called more than once.
+     * Records the turn number [id] actually ended on. A plain field write -- deciding whether and
+     * when a game has ended is the service layer's job (see
+     * GameSimulationService.endGameIfNetWorthReached and GameSimulationService.isGameOver), not
+     * this DAO's.
      */
-    fun endGameEarly(id: Uuid): Game? = transaction {
-        Game.findById(id)?.apply { turnNumber = maxOf(turnNumber, maxTurns) }
+    fun setEndedOnTurn(id: Uuid, turnNumber: Int): Game? = transaction {
+        Game.findById(id)?.apply { endedOnTurn = turnNumber }
     }
 }

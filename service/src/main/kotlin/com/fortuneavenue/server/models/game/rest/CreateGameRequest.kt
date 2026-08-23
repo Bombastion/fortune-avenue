@@ -5,6 +5,7 @@ package com.fortuneavenue.server.models.game.rest
  * [com.fortuneavenue.server.service.GameService]. The game ends the moment any player's net worth
  * (every shop they own plus the current value of every stock they hold, gold on hand excluded --
  * see [com.fortuneavenue.server.service.GameSimulationService]) reaches or exceeds it, exactly as
- * it already does once turnNumber reaches maxTurns. Defaults to 6000 gold when omitted.
+ * it already does once turnNumber reaches maxTurns. Omit to have
+ * [com.fortuneavenue.server.service.GameService.createGame] default it to 6000 gold.
  */
 data class CreateGameRequest(val boardId: String, val targetNetWorth: Int? = null)
