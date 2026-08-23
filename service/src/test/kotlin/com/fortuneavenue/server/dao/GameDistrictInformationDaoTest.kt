@@ -68,7 +68,7 @@ class GameDistrictInformationDaoTest : DatabaseTest() {
         )
     }
 
-    private fun createGameId(boardId: Uuid) = gameDao.create(boardId).id.value
+    private fun createGameId(boardId: Uuid) = gameDao.create(boardId, 6000).id.value
 
     @Test
     fun `seedForGame persists one row per district with at least one SHOP space, skipping districts with none`() {
@@ -125,6 +125,19 @@ class GameDistrictInformationDaoTest : DatabaseTest() {
 
         // average(1, 3) = 2; 2 * 0.2500 = 0.5, which rounds up to 1 under HALF_UP.
         assertThat(seeded.single().currentStockValue).isEqualTo(1)
+    }
+
+    @Test
+    fun `findById finds a seeded row by its own id, and null for one that doesn't exist`() {
+        val boardGraph = createBoardWithShops()
+        val gameId = createGameId(boardGraph.board.id.value)
+        val seededShops = gameShopInformationDao.seedForGame(gameId, boardGraph)
+        val seeded = gameDistrictInformationDao.seedForGame(gameId, boardGraph, seededShops)
+        val redInfo = seeded.single()
+
+        assertThat(gameDistrictInformationDao.findById(redInfo.id.value)?.currentStockValue)
+            .isEqualTo(75)
+        assertThat(gameDistrictInformationDao.findById(Uuid.random())).isNull()
     }
 
     @Test

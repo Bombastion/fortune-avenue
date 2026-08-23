@@ -33,7 +33,7 @@ class PlayerDaoTest : DatabaseTest() {
                 .board
                 .id
                 .value
-        return gameDao.create(boardId)
+        return gameDao.create(boardId, 6000)
     }
 
     @Test
@@ -126,7 +126,7 @@ class PlayerDaoTest : DatabaseTest() {
                 pathInputs = emptyList(),
                 startIndex = 0,
             )
-        val game = gameDao.create(board.board.id.value)
+        val game = gameDao.create(board.board.id.value, 6000)
         val player = playerDao.create(gameId = game.id.value)
         val spaceId = board.spaces.single().id.value
 

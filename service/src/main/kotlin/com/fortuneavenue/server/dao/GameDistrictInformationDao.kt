@@ -91,6 +91,15 @@ class GameDistrictInformationDao {
             }
         }
 
+    /**
+     * The seeded row itself, e.g. to look up a district's current_stock_value from a
+     * PlayerStock's gameDistrictInformationId (see GameSimulationService.netWorth). Null if [id]
+     * doesn't exist.
+     */
+    fun findById(id: Uuid): GameDistrictInformation? = transaction {
+        GameDistrictInformation.findById(id)
+    }
+
     fun findByGameAndDistrict(gameId: Uuid, districtId: Uuid): GameDistrictInformation? =
         transaction {
             GameDistrictInformation.find {

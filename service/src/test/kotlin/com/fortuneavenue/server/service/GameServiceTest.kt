@@ -31,16 +31,41 @@ class GameServiceTest {
     }
 
     @Test
-    fun `createGame persists a game when the board exists`() {
+    fun `createGame persists a game when the board exists, defaulting targetNetWorth to 6000`() {
         val boardId = Uuid.random()
         given(boardDao.findById(boardId)).willReturn(mock(BoardGraph::class.java))
         val createdGame = mock(Game::class.java)
-        given(gameDao.create(boardId)).willReturn(createdGame)
+        given(gameDao.create(boardId, 6000)).willReturn(createdGame)
 
         val result = gameService.createGame(boardId)
 
         assertThat(result.isSuccess).isTrue()
         assertThat(result.getOrNull()).isSameAs(createdGame)
+    }
+
+    @Test
+    fun `createGame passes a given targetNetWorth through to the DAO`() {
+        val boardId = Uuid.random()
+        given(boardDao.findById(boardId)).willReturn(mock(BoardGraph::class.java))
+        val createdGame = mock(Game::class.java)
+        given(gameDao.create(boardId, 9000)).willReturn(createdGame)
+
+        val result = gameService.createGame(boardId, targetNetWorth = 9000)
+
+        assertThat(result.isSuccess).isTrue()
+        assertThat(result.getOrNull()).isSameAs(createdGame)
+    }
+
+    @Test
+    fun `createGame rejects a targetNetWorth that isn't a positive integer`() {
+        val boardId = Uuid.random()
+        given(boardDao.findById(boardId)).willReturn(mock(BoardGraph::class.java))
+
+        val result = gameService.createGame(boardId, targetNetWorth = 0)
+
+        assertThat(result.isFailure).isTrue()
+        assertThat(result.exceptionOrNull()).isInstanceOf(InvalidGameException::class.java)
+        verifyNoInteractions(gameDao)
     }
 
     @Test

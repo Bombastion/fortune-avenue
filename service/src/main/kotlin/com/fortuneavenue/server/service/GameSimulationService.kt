@@ -38,7 +38,10 @@ import org.springframework.stereotype.Service
  * *after* a purchase, just from other causes not yet implemented. The turn ends once movement
  * reaches zero, at which point play moves to the next player in turn order. This is announced with
  * a [TurnEvent.TurnStarted] the moment that next player is a human, since nothing else is going to
- * happen until they roll themselves. The game ends once turnNumber reaches maxTurns.
+ * happen until they roll themselves. The game ends once turnNumber reaches maxTurns -- or the
+ * moment any player's net worth (every shop they own plus the current value of every stock they
+ * hold, gold on hand excluded -- see [netWorth]) reaches or exceeds the game's targetNetWorth,
+ * whichever happens first (see [endGameIfNetWorthReached]).
  *
  * Every space a player is moved onto along the way, whether just passed through mid-move or where
  * they end up, is also checked for a suit (HEART/DIAMOND/SPADE/CLUB, see SpaceType): landing on or
@@ -590,7 +593,7 @@ class GameSimulationService(
                         "Game $gameId hasn't started yet -- not everyone is ready."
                     )
                 )
-        if (game.turnNumber >= game.maxTurns) {
+        if (isGameOver(game)) {
             return Result.failure(InvalidTurnException("Game $gameId is already over."))
         }
 
@@ -770,6 +773,67 @@ class GameSimulationService(
     }
 
     /**
+     * [playerId]'s net worth in [gameId] -- every shop they own (see
+     * GameShopInformationDao.findOwnedByPlayer) plus the current value of every district's stock
+     * they hold (their held quantity times that district's current_stock_value -- see
+     * GameDistrictInformationDao), gold on hand deliberately excluded. Used by
+     * [endGameIfNetWorthReached] to check the target-net-worth ending condition.
+     */
+    private fun netWorth(gameId: Uuid, playerId: Uuid): Int {
+        val shopValue =
+            gameShopInformationDao.findOwnedByPlayer(gameId, playerId).sumOf { it.currentValue }
+        val stockValue =
+            playerStockDao.findByPlayer(playerId).sumOf { stock ->
+                val info =
+                    gameDistrictInformationDao.findById(stock.gameDistrictInformationId.value)
+                (info?.currentStockValue ?: 0) * stock.quantity
+            }
+        return shopValue + stockValue
+    }
+
+    /**
+     * A game is over once either turnNumber has reached maxTurns, or it was ended early because
+     * some player's net worth reached targetNetWorth (see [endGameIfNetWorthReached]) -- recorded
+     * as [Game.endedOnTurn], which stays null the whole time a game is still in progress.
+     */
+    private fun isGameOver(game: Game): Boolean =
+        game.endedOnTurn != null || game.turnNumber >= game.maxTurns
+
+    /**
+     * Ends [gameId] early -- deciding whether and when to do so is this service's job, not
+     * GameDao's (see [GameDao.setEndedOnTurn]) -- the moment any of its players' net worth (see
+     * [netWorth]) reaches or exceeds [game]'s targetNetWorth. Only bothers checking when
+     * [precedingEvents] shows something that could actually have moved a net worth this turn -- a
+     * shop purchase, a district value progression, or a stock trade -- so a turn that's just
+     * movement, a suit pickup, or a promotion payout (gold only, not counted -- see [netWorth])
+     * never touches GameShopInformationDao/PlayerStockDao/GameDistrictInformationDao at all.
+     * Checked across every player, not just the one who acted, since a stock trade's price
+     * fluctuation (see [fluctuateStockPrice]) can move the value of shares a *different* player
+     * holds. A no-op if nobody has crossed it, or if [game] was already ended -- never overwrites
+     * an already-recorded endedOnTurn.
+     */
+    private fun endGameIfNetWorthReached(
+        gameId: Uuid,
+        game: Game,
+        precedingEvents: List<TurnEvent>,
+    ) {
+        val netWorthMayHaveMoved =
+            precedingEvents.any {
+                it is TurnEvent.ShopPurchased ||
+                    it is TurnEvent.DistrictValuesRecalculated ||
+                    it is TurnEvent.StockPurchased ||
+                    it is TurnEvent.StockSold
+            }
+        if (!netWorthMayHaveMoved) return
+        if (game.endedOnTurn != null) return
+
+        val playerIds = playerDao.findByGameId(gameId).map { it.id.value }
+        if (playerIds.any { netWorth(gameId, it) >= game.targetNetWorth }) {
+            gameDao.setEndedOnTurn(gameId, game.turnNumber)
+        }
+    }
+
+    /**
      * Advances turnNumber and appends [TurnEvent.TurnEnded] to [precedingEvents] -- the shared tail
      * of every way a turn can finish.
      */
@@ -779,6 +843,7 @@ class GameSimulationService(
         game: Game,
         precedingEvents: List<TurnEvent>,
     ): Result<MovementResult> {
+        endGameIfNetWorthReached(gameId, game, precedingEvents)
         val updatedGame =
             gameDao.advanceTurn(gameId)
                 ?: return Result.failure(GameNotFoundException("Game $gameId does not exist."))
@@ -787,7 +852,7 @@ class GameSimulationService(
                 TurnEvent.TurnEnded(
                     playerId,
                     game.turnNumber,
-                    gameOver = updatedGame.turnNumber >= updatedGame.maxTurns,
+                    gameOver = isGameOver(updatedGame),
                 )
         return Result.success(MovementResult(events, updatedGame))
     }
@@ -1281,7 +1346,7 @@ class GameSimulationService(
         val events = mutableListOf<TurnEvent>()
         var current = game
 
-        while (current.turnNumber < current.maxTurns) {
+        while (!isGameOver(current)) {
             val turnOrder = current.turnOrder ?: break
             val nextPlayerId = turnOrder[current.turnNumber % turnOrder.size]
             val nextPlayer = playersById[nextPlayerId] ?: break

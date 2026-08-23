@@ -37,7 +37,7 @@ class PlayerStockDaoTest : DatabaseTest() {
                 .board
                 .id
                 .value
-        return gameDao.create(boardId)
+        return gameDao.create(boardId, 6000)
     }
 
     /**
@@ -68,7 +68,7 @@ class PlayerStockDaoTest : DatabaseTest() {
                         )
                     ),
             )
-        val game = gameDao.create(board.board.id.value)
+        val game = gameDao.create(board.board.id.value, 6000)
         val seededShops = gameShopInformationDao.seedForGame(game.id.value, board)
         val seededDistrictInfo =
             gameDistrictInformationDao.seedForGame(game.id.value, board, seededShops)

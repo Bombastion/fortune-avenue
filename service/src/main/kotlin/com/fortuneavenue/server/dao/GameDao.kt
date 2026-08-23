@@ -11,8 +11,11 @@ import org.springframework.stereotype.Repository
 @Repository
 class GameDao {
 
-    fun create(boardId: Uuid): Game = transaction {
-        Game.new { this.boardId = EntityID(boardId, BoardsTable) }
+    fun create(boardId: Uuid, targetNetWorth: Int): Game = transaction {
+        Game.new {
+            this.boardId = EntityID(boardId, BoardsTable)
+            this.targetNetWorth = targetNetWorth
+        }
     }
 
     fun findById(id: Uuid): Game? = transaction { Game.findById(id) }
@@ -48,5 +51,12 @@ class GameDao {
             turnNumber += 1
             currentMovementPoints = null
         }
+    }
+
+    /**
+     * Records the turn number [id] actually ended on
+     */
+    fun setEndedOnTurn(id: Uuid, turnNumber: Int): Game? = transaction {
+        Game.findById(id)?.apply { endedOnTurn = turnNumber }
     }
 }

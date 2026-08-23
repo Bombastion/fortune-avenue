@@ -64,7 +64,7 @@ class GameShopInformationDaoTest : DatabaseTest() {
         )
     }
 
-    private fun createGameId(boardId: Uuid) = gameDao.create(boardId).id.value
+    private fun createGameId(boardId: Uuid) = gameDao.create(boardId, 6000).id.value
 
     @Test
     fun `seedForGame persists one row per SHOP space, copying board fields and defaulting the rest`() {

@@ -84,6 +84,47 @@ class GameControllerTest : DatabaseTest() {
     }
 
     @Test
+    fun `creating a game without a targetNetWorth defaults it to 6000 gold`() {
+        val board = createBoard()
+
+        val response =
+            restTemplate.postForEntity<GameResponse>(
+                "/games",
+                CreateGameRequest(boardId = board.id),
+            )
+
+        assertThat(response.body?.targetNetWorth).isEqualTo(6000)
+    }
+
+    @Test
+    fun `creating a game with a targetNetWorth persists it`() {
+        val board = createBoard()
+
+        val response =
+            restTemplate.postForEntity<GameResponse>(
+                "/games",
+                CreateGameRequest(boardId = board.id, targetNetWorth = 9000),
+            )
+
+        assertThat(response.statusCode).isEqualTo(HttpStatus.CREATED)
+        assertThat(response.body?.targetNetWorth).isEqualTo(9000)
+    }
+
+    @Test
+    fun `creating a game with a non-positive targetNetWorth returns 400 with an explanatory message`() {
+        val board = createBoard()
+
+        val response =
+            restTemplate.postForEntity<ErrorResponse>(
+                "/games",
+                CreateGameRequest(boardId = board.id, targetNetWorth = 0),
+            )
+
+        assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
+        assertThat(response.body?.message).isNotBlank()
+    }
+
+    @Test
     fun `creating a game for a board that doesn't exist returns 400 with an explanatory message`() {
         val response =
             restTemplate.postForEntity<ErrorResponse>(

@@ -37,6 +37,7 @@ import org.mockito.BDDMockito.given
 import org.mockito.Mock
 import org.mockito.Mockito.lenient
 import org.mockito.Mockito.mock
+import org.mockito.Mockito.mockingDetails
 import org.mockito.Mockito.never
 import org.mockito.Mockito.verify
 import org.mockito.Mockito.verifyNoInteractions
@@ -179,9 +180,15 @@ class GameSimulationServiceTest {
         return info
     }
 
-    private fun mockPlayerStock(quantity: Int): PlayerStock {
+    private fun mockPlayerStock(
+        quantity: Int,
+        gameDistrictInformationId: Uuid = Uuid.random(),
+    ): PlayerStock {
         val stock = mock(PlayerStock::class.java)
         lenient().`when`(stock.quantity).thenReturn(quantity)
+        lenient()
+            .`when`(stock.gameDistrictInformationId)
+            .thenReturn(EntityID(gameDistrictInformationId, GameDistrictInformationTable))
         return stock
     }
 
@@ -191,6 +198,8 @@ class GameSimulationServiceTest {
         maxTurns: Int = 10,
         currentMovementPoints: Int? = null,
         pendingStockTradeSpaceId: Uuid? = null,
+        targetNetWorth: Int = 6000,
+        endedOnTurn: Int? = null,
     ): Game {
         val game = mock(Game::class.java)
         lenient().`when`(game.boardId).thenReturn(EntityID(boardId, BoardsTable))
@@ -201,6 +210,8 @@ class GameSimulationServiceTest {
         lenient()
             .`when`(game.pendingStockTradeSpaceId)
             .thenReturn(pendingStockTradeSpaceId?.let { EntityID(it, BoardSpacesTable) })
+        lenient().`when`(game.targetNetWorth).thenReturn(targetNetWorth)
+        lenient().`when`(game.endedOnTurn).thenReturn(endedOnTurn)
         return game
     }
 
@@ -1322,6 +1333,42 @@ class GameSimulationServiceTest {
     }
 
     @Test
+    fun `buyStock ends the game early once the buyer's stock holdings alone reach the target net worth`() {
+        val playerId = Uuid.random()
+        val districtId = Uuid.random()
+        val bankSpaceId = Uuid.random()
+        val game =
+            mockGame(
+                turnOrder = listOf(playerId),
+                turnNumber = 0,
+                currentMovementPoints = 0,
+                pendingStockTradeSpaceId = bankSpaceId,
+                targetNetWorth = 6000,
+            )
+        val player = mockPlayer(playerId)
+        val districtInfo = mockDistrictInfo(districtId, currentStockValue = 50)
+        val advancedGame = mockGame(turnOrder = listOf(playerId), turnNumber = 1)
+        given(gameDao.findById(gameId)).willReturn(game)
+        given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
+        given(gameDistrictInformationDao.findByGameAndDistrict(gameId, districtId))
+            .willReturn(districtInfo)
+        val playerState = mockPlayerState(PlayerStatus.READY)
+        given(playerDao.findState(playerId)).willReturn(playerState)
+        // 120 shares at 50 gold each is 6000 -- findByPlayer/findById are separate mocks from
+        // adjustQuantity, so this models what PlayerStockDao and GameDistrictInformationDao would
+        // report afterward, exactly as findOwnedByPlayer is stubbed directly above for shops.
+        val ownedStock =
+            mockPlayerStock(quantity = 120, gameDistrictInformationId = districtInfo.id.value)
+        given(playerStockDao.findByPlayer(playerId)).willReturn(listOf(ownedStock))
+        given(gameDistrictInformationDao.findById(districtInfo.id.value)).willReturn(districtInfo)
+        given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
+
+        service.buyStock(gameId, playerId, districtId, 10)
+
+        verify(gameDao).setEndedOnTurn(gameId, 0)
+    }
+
+    @Test
     fun `buyStock fails when the player can't afford the total cost, leaving gold and quantity untouched`() {
         val playerId = Uuid.random()
         val districtId = Uuid.random()
@@ -1465,7 +1512,17 @@ class GameSimulationServiceTest {
 
         service.buyStock(gameId, playerId, districtId, 10)
 
-        verifyNoInteractions(gameShopInformationDao)
+        // The net worth check (see GameSimulationService.endGameIfNetWorthReached) now
+        // legitimately reads owned shops on every stock trade -- the meaningful assertion here is
+        // that the district's own stock price was never touched. setCurrentStockValue takes a
+        // non-null Uuid, so an eq()/anyInt() matcher pair returns null for it and NPEs against
+        // Kotlin's null-check on that parameter -- checking recorded invocations directly
+        // sidesteps invoking the real method at all.
+        val stockPriceCalls =
+            mockingDetails(gameDistrictInformationDao).invocations.filter {
+                it.method.name == "setCurrentStockValue"
+            }
+        assertThat(stockPriceCalls).isEmpty()
     }
 
     @Test
@@ -1561,7 +1618,17 @@ class GameSimulationServiceTest {
 
         service.sellStock(gameId, playerId, districtId, 10)
 
-        verifyNoInteractions(gameShopInformationDao)
+        // The net worth check (see GameSimulationService.endGameIfNetWorthReached) now
+        // legitimately reads owned shops on every stock trade -- the meaningful assertion here is
+        // that the district's own stock price was never touched. setCurrentStockValue takes a
+        // non-null Uuid, so an eq()/anyInt() matcher pair returns null for it and NPEs against
+        // Kotlin's null-check on that parameter -- checking recorded invocations directly
+        // sidesteps invoking the real method at all.
+        val stockPriceCalls =
+            mockingDetails(gameDistrictInformationDao).invocations.filter {
+                it.method.name == "setCurrentStockValue"
+            }
+        assertThat(stockPriceCalls).isEmpty()
     }
 
     @Test
@@ -2037,6 +2104,64 @@ class GameSimulationServiceTest {
             )
         verify(playerDao).adjustGold(playerId, -150)
         verify(gameShopInformationDao).setOwner(shop.id.value, playerId)
+    }
+
+    @Test
+    fun `buyShop ends the game early once the buyer's net worth reaches the game's target net worth`() {
+        val playerId = Uuid.random()
+        val spaceId = Uuid.random()
+        val game =
+            mockGame(
+                turnOrder = listOf(playerId),
+                turnNumber = 0,
+                currentMovementPoints = 0,
+                targetNetWorth = 6000,
+            )
+        val player = mockPlayer(playerId)
+        val playerState =
+            mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceId, currentGold = 10000)
+        val shop = mockShop(spaceId = spaceId, currentValue = 6000)
+        val advancedGame = mockGame(turnOrder = listOf(playerId), turnNumber = 1)
+        given(gameDao.findById(gameId)).willReturn(game)
+        given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
+        given(playerDao.findState(playerId)).willReturn(playerState)
+        given(gameShopInformationDao.findByGameAndSpace(gameId, spaceId)).willReturn(shop)
+        // Reflects the shop the buyer is about to own -- findOwnedByPlayer is a separate mock
+        // from setOwner and isn't wired to it here, so it's stubbed directly, exactly as other
+        // tests above already stub it for the BANK promotion payout.
+        given(gameShopInformationDao.findOwnedByPlayer(gameId, playerId)).willReturn(listOf(shop))
+        given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
+
+        service.buyShop(gameId, playerId)
+
+        verify(gameDao).setEndedOnTurn(gameId, 0)
+    }
+
+    @Test
+    fun `buyShop does not end the game early when net worth stays below the target`() {
+        val playerId = Uuid.random()
+        val spaceId = Uuid.random()
+        val game =
+            mockGame(
+                turnOrder = listOf(playerId),
+                turnNumber = 0,
+                currentMovementPoints = 0,
+                targetNetWorth = 6000,
+            )
+        val player = mockPlayer(playerId)
+        val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceId)
+        val shop = mockShop(spaceId = spaceId, currentValue = 150)
+        val advancedGame = mockGame(turnOrder = listOf(playerId), turnNumber = 1)
+        given(gameDao.findById(gameId)).willReturn(game)
+        given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
+        given(playerDao.findState(playerId)).willReturn(playerState)
+        given(gameShopInformationDao.findByGameAndSpace(gameId, spaceId)).willReturn(shop)
+        given(gameShopInformationDao.findOwnedByPlayer(gameId, playerId)).willReturn(listOf(shop))
+        given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
+
+        service.buyShop(gameId, playerId)
+
+        verify(gameDao, never()).setEndedOnTurn(gameId, 0)
     }
 
     @Test
