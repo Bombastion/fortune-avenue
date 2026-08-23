@@ -1,0 +1,6 @@
+# client/ (React + Vite)
+client/node_modules/
+client/dist/
+client/*.local
+
+.DS_Store
