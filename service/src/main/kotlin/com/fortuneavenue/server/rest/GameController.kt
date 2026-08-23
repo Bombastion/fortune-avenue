@@ -26,7 +26,7 @@ class GameController(private val gameService: GameService) {
                 ?: return ResponseEntity.badRequest()
                     .body<Any>(ErrorResponse("boardId is not a valid id."))
 
-        val result = gameService.createGame(boardId)
+        val result = gameService.createGame(boardId, request.targetNetWorth)
 
         return result.fold(
             onSuccess = { game ->

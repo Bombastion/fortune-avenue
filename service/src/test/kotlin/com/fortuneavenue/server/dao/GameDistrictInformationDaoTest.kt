@@ -128,6 +128,19 @@ class GameDistrictInformationDaoTest : DatabaseTest() {
     }
 
     @Test
+    fun `findById finds a seeded row by its own id, and null for one that doesn't exist`() {
+        val boardGraph = createBoardWithShops()
+        val gameId = createGameId(boardGraph.board.id.value)
+        val seededShops = gameShopInformationDao.seedForGame(gameId, boardGraph)
+        val seeded = gameDistrictInformationDao.seedForGame(gameId, boardGraph, seededShops)
+        val redInfo = seeded.single()
+
+        assertThat(gameDistrictInformationDao.findById(redInfo.id.value)?.currentStockValue)
+            .isEqualTo(75)
+        assertThat(gameDistrictInformationDao.findById(Uuid.random())).isNull()
+    }
+
+    @Test
     fun `findByGameAndDistrict finds the seeded row for a district, and null for one with no shops`() {
         val boardGraph = createBoardWithShops()
         val gameId = createGameId(boardGraph.board.id.value)

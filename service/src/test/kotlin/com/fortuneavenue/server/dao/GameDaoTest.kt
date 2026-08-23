@@ -50,6 +50,21 @@ class GameDaoTest : DatabaseTest() {
     }
 
     @Test
+    fun `create defaults target net worth to 6000 gold`() {
+        val created = gameDao.create(createBoardId())
+
+        assertThat(created.targetNetWorth).isEqualTo(6000)
+    }
+
+    @Test
+    fun `create can override target net worth`() {
+        val created = gameDao.create(createBoardId(), targetNetWorth = 9000)
+
+        assertThat(created.targetNetWorth).isEqualTo(9000)
+        assertThat(gameDao.findById(created.id.value)!!.targetNetWorth).isEqualTo(9000)
+    }
+
+    @Test
     fun `setMovementPoints records remaining movement`() {
         val game = gameDao.create(createBoardId())
 
@@ -102,6 +117,28 @@ class GameDaoTest : DatabaseTest() {
 
         assertThat(advanced!!.currentMovementPoints).isNull()
         assertThat(gameDao.findById(game.id.value)!!.currentMovementPoints).isNull()
+    }
+
+    @Test
+    fun `endGameEarly fast-forwards the turn number to max turns`() {
+        val game = gameDao.create(createBoardId())
+
+        val ended = gameDao.endGameEarly(game.id.value)
+
+        assertThat(ended).isNotNull()
+        assertThat(ended!!.turnNumber).isEqualTo(ended.maxTurns)
+        assertThat(gameDao.findById(game.id.value)!!.turnNumber).isEqualTo(ended.maxTurns)
+    }
+
+    @Test
+    fun `endGameEarly never lowers the turn number if it's already past max turns`() {
+        val game = gameDao.create(createBoardId())
+        repeat(game.maxTurns + 2) { gameDao.advanceTurn(game.id.value) }
+        val pastMaxTurns = gameDao.findById(game.id.value)!!.turnNumber
+
+        val ended = gameDao.endGameEarly(game.id.value)
+
+        assertThat(ended!!.turnNumber).isEqualTo(pastMaxTurns)
     }
 
     @Test

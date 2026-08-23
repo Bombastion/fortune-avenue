@@ -11,8 +11,15 @@ import org.springframework.stereotype.Repository
 @Repository
 class GameDao {
 
-    fun create(boardId: Uuid): Game = transaction {
-        Game.new { this.boardId = EntityID(boardId, BoardsTable) }
+    /**
+     * [targetNetWorth], if given, overrides games.target_net_worth's own default (6000) -- see
+     * GamesTable.
+     */
+    fun create(boardId: Uuid, targetNetWorth: Int? = null): Game = transaction {
+        Game.new {
+            this.boardId = EntityID(boardId, BoardsTable)
+            if (targetNetWorth != null) this.targetNetWorth = targetNetWorth
+        }
     }
 
     fun findById(id: Uuid): Game? = transaction { Game.findById(id) }
@@ -48,5 +55,17 @@ class GameDao {
             turnNumber += 1
             currentMovementPoints = null
         }
+    }
+
+    /**
+     * Ends [id] immediately by fast-forwarding turn_number to (at least) max_turns -- used the
+     * moment any player's net worth reaches or exceeds target_net_worth (see
+     * GameSimulationService.endGameIfNetWorthReached), so every place that already treats
+     * turn_number >= max_turns as "the game is over" (currentTurnGame, playComputerTurns, endTurn)
+     * picks this up for free, with no separate game-over signal to keep in sync. maxOf guards
+     * against lowering turn_number if this is somehow called more than once.
+     */
+    fun endGameEarly(id: Uuid): Game? = transaction {
+        Game.findById(id)?.apply { turnNumber = maxOf(turnNumber, maxTurns) }
     }
 }
