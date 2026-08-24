@@ -7,7 +7,7 @@ Kotlin + Spring Boot backend for Fortune Avenue.
 - **WebSocket** (`/ws/game`) carries real-time game state — dice rolls, turns, board updates — since players need to see each other's moves live rather than polling for them.
 - **REST** handles everything that isn't part of a live game session: health checks (`/health`), users (`/users`), boards (`/boards`), games (`/games`, tied to a board), and players (`/games/{gameId}/players`, optionally tied to a user) today, with room for auth, lobbies, and history later.
 - **Persistence** uses [Exposed](https://github.com/JetBrains/Exposed) as the ORM against Postgres, with [Flyway](https://flywaydb.org/) managing schema migrations (`src/main/resources/db/migration/`).
-- **Docker**: `docker-compose.yml` here runs the whole stack — this app, its Postgres instance, the [client](../client/README.md), and an nginx reverse proxy sitting in front of both. A separate `docker-compose.test.yml` runs the test suite against its own, disposable Postgres instance, so tests never touch the app's data.
+- **Docker**: `docker-compose.yml` here runs just this app and its Postgres instance — `make up`/`make down` in this directory affect the backend only. The [project root](..) has its own `docker-compose.yml` and `Makefile` that run the whole stack — this app, the [client](../client/README.md), Postgres, and an nginx reverse proxy in front of the first two. A separate `docker-compose.test.yml` here runs the test suite against its own, disposable Postgres instance, so tests never touch the app's data.
 - **Formatting**: [ktfmt](https://github.com/facebook/ktfmt) (kotlinlang style) enforces a consistent Kotlin style. `./gradlew check` runs `ktfmtCheck` automatically; `make fmt` / `make lint` are shortcuts that don't require a local JDK.
 
 ## Common actions
@@ -16,8 +16,8 @@ All commands below run from inside this directory (`service/`) and assume Docker
 
 | Command | What it does |
 | --- | --- |
-| `make up` | Build (if needed) and start the app + its Postgres instance, client, and reverse proxy |
-| `make down` | Stop and remove the app's containers |
+| `make up` | Build (if needed) and start the backend + its Postgres instance (no client/proxy) |
+| `make down` | Stop and remove the backend's containers |
 | `make test` | Build (if needed), run the full test suite, and tear the test stack down afterward |
 | `make test-filter TESTS="..."` | Run specific tests only, e.g. `make test-filter TESTS="com.fortuneavenue.server.rest.UserControllerTest"` |
 | `make down-test` | Manually stop and remove the test stack, if a run was interrupted |
@@ -28,6 +28,6 @@ Once `make up` is running:
 
 | URL | What's there |
 | --- | --- |
-| `localhost:8000` | The client + backend together, behind the reverse proxy — the normal way to use the app |
-| `localhost:8080` | The backend directly — `GET /health` is a good first check |
-| `localhost:3000` | The client directly, for a quick look (API calls from here won't resolve — see [client README](../client/README.md)) |
+| `localhost:8080` | The backend — `GET /health` is a good first check |
+
+To bring up the client and reverse proxy too, use `make up` from the [project root](..) instead — that starts the full stack, with the client + backend together behind the proxy at `localhost:8000` (see the [project README](../README.md)).
