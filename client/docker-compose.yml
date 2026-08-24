@@ -1,0 +1,8 @@
+name: fortune-avenue-client
+
+services:
+  client:
+    build:
+      context: .
+    ports:
+      - "3000:80"

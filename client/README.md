@@ -8,14 +8,32 @@ yet.
 
 ## Running it
 
-The client is meant to run as part of the full stack — see [`service/README.md`](../service/README.md)
-(`make up` from `service/`). Once that's running:
+The client is meant to run as part of the full stack — see the [project README](../README.md)
+(`make up` from the project root). Once that's running:
 
 | URL | What you get |
 | --- | --- |
 | http://localhost:8000 | The client, with `/health` (and future API paths) proxied to the backend — this is the "real" way to use the app |
 | http://localhost:3000 | The client on its own, for a quick look — API calls from here won't resolve, since there's no proxy in front of it |
 | http://localhost:8080 | The backend on its own, unchanged |
+
+## Running just the client via Docker
+
+To build and run only the client container — no backend, Postgres, or proxy — use the Makefile in
+this directory:
+
+```bash
+make up    # build (if needed) and start the client on its own, at http://localhost:3000
+make down  # stop and remove it
+```
+
+This is the same single-container setup as `localhost:3000` above: API calls made against it won't
+resolve, since nothing is proxying them to the backend. It's for previewing the built UI in
+isolation, not exercising real API calls.
+
+`make build` builds the production static assets in a container, verifying the build stage
+succeeds, without starting anything. `make test` is a placeholder for when a test suite exists —
+there isn't one yet.
 
 ## Local development without Docker
 

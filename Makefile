@@ -30,9 +30,9 @@ down-test: ## Stop and remove the test stack's containers
 	$(COMPOSE_TEST) down
 
 fmt: ## Reformat Kotlin sources with ktfmt, writing changes to disk
-	docker build --target build -t fortune-avenue-service-build .
-	docker run --rm -v $(CURDIR):/workspace fortune-avenue-service-build ./gradlew --no-daemon ktfmtFormat
+	docker build --target build -t fortune-avenue-build .
+	docker run --rm -v $(CURDIR):/workspace fortune-avenue-build ./gradlew --no-daemon ktfmtFormat
 
 lint: ## Check Kotlin formatting without modifying files (what `check` runs)
-	docker build --target build -t fortune-avenue-service-build .
-	docker run --rm -v $(CURDIR):/workspace fortune-avenue-service-build ./gradlew --no-daemon ktfmtCheck
+	docker build --target build -t fortune-avenue-build .
+	docker run --rm -v $(CURDIR):/workspace fortune-avenue-build ./gradlew --no-daemon ktfmtCheck
