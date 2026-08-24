@@ -14,7 +14,7 @@ See the [client README](client/README.md) for how it fits together with the back
 
 ### Server
 
-The server lives in [`service/`](service/) and is a Kotlin + Spring Boot application. It exposes a WebSocket endpoint for real-time gameplay and a small REST API for everything else, backed by a Postgres database. The whole stack — backend, client, Postgres, and an nginx reverse proxy in front of the first two — runs in Docker via the [`docker-compose.yml`](docker-compose.yml) at the project root; run `make up` from here to build and start all of it. The [server README](service/README.md) and [client README](client/README.md) also each have their own `docker-compose.yml` and `Makefile` for running just the backend or just the client on their own.
+The server lives in [`service/`](service/) and is a Kotlin + Spring Boot application. It exposes a WebSocket endpoint for real-time gameplay and a small REST API for everything else, backed by a Postgres database. The whole stack — backend, client, Postgres, and an nginx reverse proxy in front of the first two — runs in Docker via the [`docker-compose.yml`](docker-compose.yml) at the project root; run `make up` from here to build and start all of it. The [server README](service/README.md) and [client README](client/README.md) also each have their own `docker-compose.yml` and `Makefile` for running just the backend or just the client on their own — each sets its own explicit compose project name (`fortune-avenue`, `fortune-avenue-service`, `fortune-avenue-client`) so containers, networks, and volumes stay clearly namespaced instead of inheriting a bare directory name like `service`.
 
 See the [server README](service/README.md) for details about how the backend works if you're interested.
 

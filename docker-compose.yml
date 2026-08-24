@@ -1,3 +1,5 @@
+name: fortune-avenue
+
 services:
   postgres:
     image: postgres:18-alpine

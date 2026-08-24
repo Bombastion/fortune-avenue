@@ -1,3 +1,5 @@
+name: fortune-avenue-service-test
+
 services:
   postgres-test:
     image: postgres:18-alpine
