@@ -1,0 +1,7 @@
+name: fortune-avenue-client-test
+
+services:
+  test:
+    build:
+      context: .
+      target: test

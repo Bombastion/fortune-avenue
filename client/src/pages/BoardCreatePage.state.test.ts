@@ -1,0 +1,221 @@
+import { describe, expect, it } from "vitest";
+import {
+  type BoardFormState,
+  type PathFormState,
+  type SpaceFormState,
+  buildCreateBoardRequest,
+  emptyBoardForm,
+  removeDistrictAt,
+  removeSpaceAt,
+  requiredProgressionLevels,
+  spaceCountForDistrict,
+  validateBoardForm,
+} from "./BoardCreatePage.state";
+
+describe("requiredProgressionLevels", () => {
+  it("requires nothing below 2 spaces", () => {
+    expect(requiredProgressionLevels(0)).toEqual([]);
+    expect(requiredProgressionLevels(1)).toEqual([]);
+  });
+
+  it("requires one level per ownedShopCount from 2 up to the space count", () => {
+    expect(requiredProgressionLevels(2)).toEqual([2]);
+    expect(requiredProgressionLevels(3)).toEqual([2, 3]);
+    expect(requiredProgressionLevels(5)).toEqual([2, 3, 4, 5]);
+  });
+});
+
+describe("spaceCountForDistrict", () => {
+  const spaces: SpaceFormState[] = [
+    { localId: "s0", spaceType: "SHOP", baseValue: "", basePricePercentage: "", districtIndex: 0 },
+    { localId: "s1", spaceType: "SHOP", baseValue: "", basePricePercentage: "", districtIndex: 1 },
+    { localId: "s2", spaceType: "BASIC", baseValue: "", basePricePercentage: "", districtIndex: null },
+    { localId: "s3", spaceType: "SHOP", baseValue: "", basePricePercentage: "", districtIndex: 0 },
+  ];
+
+  it("counts only spaces pointing at the given district index", () => {
+    expect(spaceCountForDistrict(spaces, 0)).toBe(2);
+    expect(spaceCountForDistrict(spaces, 1)).toBe(1);
+    expect(spaceCountForDistrict(spaces, 2)).toBe(0);
+  });
+});
+
+describe("removeSpaceAt", () => {
+  function threeSpaceForm(): BoardFormState {
+    const spaces: SpaceFormState[] = [
+      { localId: "s0", spaceType: "BASIC", baseValue: "", basePricePercentage: "", districtIndex: null },
+      { localId: "s1", spaceType: "BASIC", baseValue: "", basePricePercentage: "", districtIndex: null },
+      { localId: "s2", spaceType: "BASIC", baseValue: "", basePricePercentage: "", districtIndex: null },
+    ];
+    const paths: PathFormState[] = [
+      { localId: "p0", from: 0, to: 1, branchOrder: "0" }, // references the removed space (to)
+      { localId: "p1", from: 1, to: 2, branchOrder: "0" }, // references the removed space (from)
+      { localId: "p2", from: 0, to: 2, branchOrder: "0" }, // doesn't touch it, but "to" shifts down
+    ];
+    return { ...emptyBoardForm(), spaces, paths, startSpaceIndex: 1 };
+  }
+
+  it("drops any path touching the removed space, and shifts indices past it down by one", () => {
+    const result = removeSpaceAt(threeSpaceForm(), 1);
+
+    expect(result.spaces).toHaveLength(2);
+    expect(result.paths).toEqual([{ localId: "p2", from: 0, to: 1, branchOrder: "0" }]);
+  });
+
+  it("clears the start space if it was the one removed", () => {
+    const result = removeSpaceAt(threeSpaceForm(), 1);
+    expect(result.startSpaceIndex).toBeNull();
+  });
+
+  it("decrements the start space if it came after the removed one, and leaves it alone if before", () => {
+    const after = removeSpaceAt({ ...threeSpaceForm(), startSpaceIndex: 2 }, 1);
+    expect(after.startSpaceIndex).toBe(1);
+
+    const before = removeSpaceAt({ ...threeSpaceForm(), startSpaceIndex: 0 }, 1);
+    expect(before.startSpaceIndex).toBe(0);
+  });
+});
+
+describe("removeDistrictAt", () => {
+  it("clears districtIndex on spaces pointing at the removed district, and shifts later indices down", () => {
+    const spaces: SpaceFormState[] = [
+      { localId: "s0", spaceType: "SHOP", baseValue: "", basePricePercentage: "", districtIndex: 0 },
+      { localId: "s1", spaceType: "SHOP", baseValue: "", basePricePercentage: "", districtIndex: 1 },
+      { localId: "s2", spaceType: "SHOP", baseValue: "", basePricePercentage: "", districtIndex: 2 },
+      { localId: "s3", spaceType: "BASIC", baseValue: "", basePricePercentage: "", districtIndex: null },
+    ];
+    const form: BoardFormState = {
+      ...emptyBoardForm(),
+      spaces,
+      districts: [
+        { localId: "d0", name: "A", colorHex: "000000", minimumStockPercentage: "0.5000", progressionValues: {} },
+        { localId: "d1", name: "B", colorHex: "111111", minimumStockPercentage: "0.5000", progressionValues: {} },
+        { localId: "d2", name: "C", colorHex: "222222", minimumStockPercentage: "0.5000", progressionValues: {} },
+      ],
+    };
+
+    const result = removeDistrictAt(form, 1);
+
+    expect(result.districts.map((d) => d.name)).toEqual(["A", "C"]);
+    expect(result.spaces.map((s) => s.districtIndex)).toEqual([0, null, 1, null]);
+  });
+});
+
+describe("buildCreateBoardRequest", () => {
+  it("trims, coerces, and shapes form state into a CreateBoardRequest", () => {
+    const spaces: SpaceFormState[] = [
+      { localId: "s0", spaceType: "BANK", baseValue: "", basePricePercentage: "", districtIndex: null },
+      { localId: "s1", spaceType: "SHOP", baseValue: "100", basePricePercentage: "0.1234", districtIndex: 0 },
+      { localId: "s2", spaceType: "SHOP", baseValue: "200", basePricePercentage: "0.2345", districtIndex: 0 },
+    ];
+    const paths: PathFormState[] = [
+      { localId: "p0", from: 0, to: 1, branchOrder: "0" },
+      { localId: "p1", from: 1, to: 2, branchOrder: "1" },
+    ];
+    const form: BoardFormState = {
+      name: " My Board ",
+      startingGold: "1500",
+      baseSalary: "200",
+      promotionBonus: "0",
+      startSpaceIndex: 0,
+      spaces,
+      paths,
+      districts: [
+        {
+          localId: "d0",
+          name: " Downtown ",
+          colorHex: "1e90ff",
+          minimumStockPercentage: "0.5000",
+          progressionValues: {
+            2: { existingShopBoostPercentage: "0.1000 ", newShopBoostPercentage: " 0.2000" },
+          },
+        },
+      ],
+    };
+
+    expect(buildCreateBoardRequest(form)).toEqual({
+      name: "My Board",
+      spaces: [
+        { spaceType: "BANK" },
+        { spaceType: "SHOP", baseValue: 100, basePricePercentage: "0.1234", districtIndex: 0 },
+        { spaceType: "SHOP", baseValue: 200, basePricePercentage: "0.2345", districtIndex: 0 },
+      ],
+      paths: [
+        { from: 0, to: 1, branchOrder: 0 },
+        { from: 1, to: 2, branchOrder: 1 },
+      ],
+      startSpaceIndex: 0,
+      startingGold: 1500,
+      baseSalary: 200,
+      promotionBonus: 0,
+      districts: [
+        {
+          name: "Downtown",
+          colorHex: "1E90FF",
+          minimumStockPercentage: "0.5000",
+          progressions: [
+            { ownedShopCount: 2, existingShopBoostPercentage: "0.1000", newShopBoostPercentage: "0.2000" },
+          ],
+        },
+      ],
+    });
+  });
+});
+
+describe("validateBoardForm", () => {
+  it("reports every problem with a freshly-emptied form", () => {
+    const result = validateBoardForm(emptyBoardForm());
+
+    expect(Object.keys(result.fieldErrors).sort()).toEqual(
+      ["baseSalary", "name", "requiredSpaceTypes", "spaces", "startSpaceIndex"].sort(),
+    );
+    expect(result.errors).toHaveLength(5);
+  });
+
+  it("accepts a minimal but complete board", () => {
+    const spaces: SpaceFormState[] = [
+      { localId: "s0", spaceType: "BANK", baseValue: "", basePricePercentage: "", districtIndex: null },
+      { localId: "s1", spaceType: "HEART", baseValue: "", basePricePercentage: "", districtIndex: null },
+      { localId: "s2", spaceType: "DIAMOND", baseValue: "", basePricePercentage: "", districtIndex: null },
+      { localId: "s3", spaceType: "SPADE", baseValue: "", basePricePercentage: "", districtIndex: null },
+      { localId: "s4", spaceType: "CLUB", baseValue: "", basePricePercentage: "", districtIndex: null },
+    ];
+    const paths: PathFormState[] = [
+      { localId: "p0", from: 0, to: 1, branchOrder: "0" },
+      { localId: "p1", from: 1, to: 2, branchOrder: "0" },
+      { localId: "p2", from: 2, to: 3, branchOrder: "0" },
+      { localId: "p3", from: 3, to: 4, branchOrder: "0" },
+      { localId: "p4", from: 4, to: 0, branchOrder: "0" },
+    ];
+    const form: BoardFormState = {
+      name: "Test Board",
+      startingGold: "1500",
+      baseSalary: "200",
+      promotionBonus: "0",
+      startSpaceIndex: 0,
+      spaces,
+      paths,
+      districts: [],
+    };
+
+    expect(validateBoardForm(form)).toEqual({ errors: [], fieldErrors: {} });
+  });
+
+  it("validates SHOP-specific fields independently of the rest of the form", () => {
+    const spaces: SpaceFormState[] = [
+      { localId: "s0", spaceType: "SHOP", baseValue: "", basePricePercentage: "", districtIndex: null },
+      { localId: "s1", spaceType: "SHOP", baseValue: "100", basePricePercentage: "0.5000", districtIndex: null },
+      { localId: "s2", spaceType: "BASIC", baseValue: "100", basePricePercentage: "0.5000", districtIndex: null },
+    ];
+    const form: BoardFormState = { ...emptyBoardForm(), spaces };
+
+    const result = validateBoardForm(form);
+
+    expect(result.fieldErrors["spaces.0.baseValue"]).toBeDefined();
+    expect(result.fieldErrors["spaces.0.basePricePercentage"]).toBeDefined();
+    expect(result.fieldErrors["spaces.1.baseValue"]).toBeUndefined();
+    expect(result.fieldErrors["spaces.1.basePricePercentage"]).toBeUndefined();
+    expect(result.fieldErrors["spaces.2.baseValue"]).toBeDefined();
+    expect(result.fieldErrors["spaces.2.basePricePercentage"]).toBeDefined();
+  });
+});

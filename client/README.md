@@ -20,20 +20,42 @@ The client is meant to run as part of the full stack — see the [project README
 ## Running just the client via Docker
 
 To build and run only the client container — no backend, Postgres, or proxy — use the Makefile in
-this directory:
+this directory. Run `make help` (or just `make`) at any time to see the full list from the
+terminal.
 
-```bash
-make up    # build (if needed) and start the client on its own, at http://localhost:3000
-make down  # stop and remove it
-```
+| Command | What it does |
+| --- | --- |
+| `make up` | Build (if needed) and start the client on its own, at http://localhost:3000 |
+| `make down` | Stop and remove the client's container |
+| `make build` | Build the production static assets in a container, verifying the build stage succeeds, without starting anything |
+| `make test` | Build (if needed), run the full test suite, and tear the test stack down afterward |
+| `make test-filter TESTS="..."` | Run specific tests only, e.g. `make test-filter TESTS="src/validation/rules.test.ts"` |
+| `make down-test` | Manually stop and remove the test stack, if a run was interrupted |
 
-This is the same single-container setup as `localhost:3000` above: API calls made against it won't
-resolve, since nothing is proxying them to the backend. It's for previewing the built UI in
+`make up`'s single-container setup is the same as `localhost:3000` above: API calls made against it
+won't resolve, since nothing is proxying them to the backend. It's for previewing the built UI in
 isolation, not exercising real API calls.
 
-`make build` builds the production static assets in a container, verifying the build stage
-succeeds, without starting anything. `make test` is a placeholder for when a test suite exists —
-there isn't one yet.
+## Running tests
+
+Tests run with [Vitest](https://vitest.dev/) and live next to the code they cover, as `*.test.ts`
+files (e.g. `src/validation/rules.test.ts`). `make test` builds a disposable Docker image (a `test`
+stage in the Dockerfile, reusing the same cached `npm install` and build steps as the runtime image
+— see `docker-compose.test.yml`) and runs the whole suite in it, mirroring how the
+[service](../service/README.md) runs its own tests:
+
+```bash
+make test                                              # everything
+make test-filter TESTS="src/api/json.test.ts"          # one file
+make test-filter TESTS="src/validation"                # everything under a path
+```
+
+No backend or database is involved — today's tests only cover pure logic (form validation, the
+board-graph reachability check, request serialization), so there's nothing to spin up beyond the
+client image itself.
+
+To run tests directly on your machine instead (faster feedback while iterating), see "Local
+development without Docker" below, then run `npm test` (or `npx vitest` for watch mode).
 
 ## Local development without Docker
 

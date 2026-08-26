@@ -13,6 +13,14 @@ RUN npm install
 COPY . .
 RUN npm run build
 
+# --- Test stage ---
+# Reuses everything the build stage already set up (deps installed, sources
+# copied, and the production build already verified to succeed). Doesn't run
+# tests at image-build time -- CMD runs them when the container starts, the
+# same pattern the service Dockerfile's test stage uses.
+FROM build AS test
+CMD ["npm", "test"]
+
 # --- Runtime stage ---
 FROM nginx:1.27-alpine AS runtime
 COPY --from=build /workspace/dist /usr/share/nginx/html
