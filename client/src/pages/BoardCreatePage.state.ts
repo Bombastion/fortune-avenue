@@ -12,12 +12,14 @@ import type {
 import { SUIT_SPACE_TYPES } from "../api/types";
 import { validateBoardGraph } from "../validation/boardGraph";
 import {
+  DECIMAL_SCALE,
   isBlank,
-  isFourDigitFractionStrictlyBetweenZeroAndOne,
+  isFractionStrictlyBetweenZeroAndOne,
   isHexColor,
   isNonNegativeIntegerString,
-  isPositiveFourDigitDecimalString,
+  isPositiveDecimalString,
   isPositiveIntegerString,
+  toFixedDecimalString,
 } from "../validation/rules";
 import { newLocalId } from "../utils/id";
 
@@ -207,11 +209,11 @@ export function validateBoardForm(form: BoardFormState): BoardValidationResult {
       if (!isPositiveIntegerString(space.baseValue)) {
         addError(result, `spaces.${index}.baseValue`, `Space #${index}: a SHOP space needs a positive baseValue.`);
       }
-      if (!isFourDigitFractionStrictlyBetweenZeroAndOne(space.basePricePercentage)) {
+      if (!isFractionStrictlyBetweenZeroAndOne(space.basePricePercentage)) {
         addError(
           result,
           `spaces.${index}.basePricePercentage`,
-          `Space #${index}: a SHOP space needs a basePricePercentage strictly between 0 and 1, with exactly 4 digits (e.g. 0.1234).`,
+          `Space #${index}: a SHOP space needs a basePricePercentage strictly between 0 and 1 (e.g. 0.05 or .05), with at most ${DECIMAL_SCALE} decimal digits.`,
         );
       }
     } else {
@@ -223,6 +225,17 @@ export function validateBoardForm(form: BoardFormState): BoardValidationResult {
           result,
           `spaces.${index}.basePricePercentage`,
           `Space #${index}: only SHOP spaces have a basePricePercentage.`,
+        );
+      }
+      // Not a server-enforced rule today (DistrictValidator.kt only checks the index is in
+      // range), but a product rule the UI enforces: the "District" field only appears for SHOP
+      // spaces, and switching a space away from SHOP clears it. This is the belt-and-suspenders
+      // check in case some other code path leaves a stale value in place.
+      if (space.districtIndex !== null) {
+        addError(
+          result,
+          `spaces.${index}.districtIndex`,
+          `Space #${index}: only SHOP spaces may belong to a district.`,
         );
       }
     }
@@ -254,11 +267,11 @@ export function validateBoardForm(form: BoardFormState): BoardValidationResult {
         `District #${index}: colorHex must be exactly 6 hex characters (0-9, A-F).`,
       );
     }
-    if (!isFourDigitFractionStrictlyBetweenZeroAndOne(district.minimumStockPercentage)) {
+    if (!isFractionStrictlyBetweenZeroAndOne(district.minimumStockPercentage)) {
       addError(
         result,
         `districts.${index}.minimumStockPercentage`,
-        `District #${index}: minimumStockPercentage must be strictly between 0 and 1, with exactly 4 digits (e.g. 0.5000).`,
+        `District #${index}: minimumStockPercentage must be strictly between 0 and 1 (e.g. 0.5 or .5), with at most ${DECIMAL_SCALE} decimal digits.`,
       );
     }
 
@@ -266,18 +279,18 @@ export function validateBoardForm(form: BoardFormState): BoardValidationResult {
     const levels = requiredProgressionLevels(spaceCount);
     for (const level of levels) {
       const values = district.progressionValues[level];
-      if (!values || !isPositiveFourDigitDecimalString(values.existingShopBoostPercentage)) {
+      if (!values || !isPositiveDecimalString(values.existingShopBoostPercentage)) {
         addError(
           result,
           `districts.${index}.progression.${level}.existing`,
-          `District #${index}, ownedShopCount ${level}: existingShopBoostPercentage must be a positive value with exactly 4 digits.`,
+          `District #${index}, ownedShopCount ${level}: existingShopBoostPercentage must be a positive value with at most ${DECIMAL_SCALE} decimal digits.`,
         );
       }
-      if (!values || !isPositiveFourDigitDecimalString(values.newShopBoostPercentage)) {
+      if (!values || !isPositiveDecimalString(values.newShopBoostPercentage)) {
         addError(
           result,
           `districts.${index}.progression.${level}.new`,
-          `District #${index}, ownedShopCount ${level}: newShopBoostPercentage must be a positive value with exactly 4 digits.`,
+          `District #${index}, ownedShopCount ${level}: newShopBoostPercentage must be a positive value with at most ${DECIMAL_SCALE} decimal digits.`,
         );
       }
     }
@@ -305,8 +318,15 @@ export function buildCreateBoardRequest(form: BoardFormState): CreateBoardReques
   const spaces: CreateBoardSpaceRequest[] = form.spaces.map((space) => ({
     spaceType: space.spaceType,
     baseValue: space.spaceType === "SHOP" ? Number(space.baseValue) : undefined,
-    basePricePercentage: space.spaceType === "SHOP" ? space.basePricePercentage.trim() : undefined,
-    districtIndex: space.districtIndex ?? undefined,
+    // The form accepts any human-friendly way of writing this (".05", "0.05", "0.0500", ...) --
+    // toFixedDecimalString turns whatever was typed into the exact 4-decimal-digit string the
+    // server's BigDecimal parsing requires, now that validateBoardForm has already confirmed it's
+    // a valid value with no more precision than that.
+    basePricePercentage:
+      space.spaceType === "SHOP" ? toFixedDecimalString(space.basePricePercentage) : undefined,
+    // Only SHOP spaces may belong to a district (see validateBoardForm above) -- guarded again
+    // here rather than trusting that every caller went through validation first.
+    districtIndex: space.spaceType === "SHOP" ? (space.districtIndex ?? undefined) : undefined,
   }));
 
   const paths: CreateBoardPathRequest[] = form.paths.map((path) => ({
@@ -322,15 +342,15 @@ export function buildCreateBoardRequest(form: BoardFormState): CreateBoardReques
       const values = district.progressionValues[level];
       return {
         ownedShopCount: level,
-        existingShopBoostPercentage: values.existingShopBoostPercentage.trim(),
-        newShopBoostPercentage: values.newShopBoostPercentage.trim(),
+        existingShopBoostPercentage: toFixedDecimalString(values.existingShopBoostPercentage),
+        newShopBoostPercentage: toFixedDecimalString(values.newShopBoostPercentage),
       };
     });
 
     return {
       name: district.name.trim(),
       colorHex: district.colorHex.trim().toUpperCase(),
-      minimumStockPercentage: district.minimumStockPercentage.trim(),
+      minimumStockPercentage: toFixedDecimalString(district.minimumStockPercentage),
       progressions,
     };
   });

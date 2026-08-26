@@ -58,7 +58,7 @@ function CreateUserForm() {
           type="text"
           value={username}
           onChange={(event) => setUsername(event.target.value)}
-          placeholder="e.g. tyler"
+          placeholder="e.g. xXcooluser22Xx"
         />
       </Field>
       <button type="submit" className="button" disabled={submitting}>

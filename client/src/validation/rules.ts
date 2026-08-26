@@ -8,25 +8,71 @@
 // The server remains the source of truth -- these are duplicated on purpose for instant feedback,
 // not to replace server-side validation.
 
-const FOUR_DIGIT_DECIMAL_PATTERN = /^-?\d+\.\d{4}$/;
 const HEX_COLOR_PATTERN = /^[0-9A-Fa-f]{6}$/;
 
-/** True if [raw] is a decimal string with exactly 4 digits after the decimal point. */
-export function isFourDigitDecimalString(raw: string): boolean {
-  return FOUR_DIGIT_DECIMAL_PATTERN.test(raw.trim());
+/**
+ * The server's BigDecimal percentage fields (basePricePercentage, minimumStockPercentage, the
+ * boost percentages) must reach it with exactly this many digits after the decimal point -- see
+ * api/json.ts. Someone filling out the form shouldn't have to type that themselves though: ".05"
+ * and "0.0500" mean the same thing, and the form should accept either. So the rule here is the
+ * opposite of what the server enforces -- at most this many decimal digits, not exactly -- and
+ * toFixedDecimalString below pads a shorter value out to the server's exact format once validation
+ * has passed. More than this many digits is rejected rather than rounded, since rounding would
+ * silently throw away precision the person actually typed.
+ */
+export const DECIMAL_SCALE = 4;
+
+interface ParsedDecimal {
+  value: number;
+  decimalDigits: number;
 }
 
-/** True if [raw] has exactly 4 decimal digits and represents a value strictly between 0 and 1. */
-export function isFourDigitFractionStrictlyBetweenZeroAndOne(raw: string): boolean {
-  if (!isFourDigitDecimalString(raw)) return false;
-  const value = Number(raw);
-  return value > 0 && value < 1;
+// Accepts any ordinary way of writing a decimal number -- "5", "5.", ".5", "0.5" -- but not
+// scientific notation, thousands separators, or multiple decimal points.
+const DECIMAL_NUMBER_PATTERN = /^-?(?:\d+\.?\d*|\.\d+)$/;
+
+function parseDecimal(raw: string): ParsedDecimal | null {
+  const trimmed = raw.trim();
+  if (!DECIMAL_NUMBER_PATTERN.test(trimmed)) return null;
+
+  const value = Number(trimmed);
+  if (!Number.isFinite(value)) return null;
+
+  const dotIndex = trimmed.indexOf(".");
+  const decimalDigits = dotIndex === -1 ? 0 : trimmed.length - dotIndex - 1;
+
+  return { value, decimalDigits };
 }
 
-/** True if [raw] has exactly 4 decimal digits and represents a positive value. */
-export function isPositiveFourDigitDecimalString(raw: string): boolean {
-  if (!isFourDigitDecimalString(raw)) return false;
-  return Number(raw) > 0;
+/**
+ * True if [raw] is a decimal value strictly between 0 and 1, with at most [DECIMAL_SCALE] digits
+ * after the decimal point. Accepts any equivalent way of writing that value -- "0.05", ".05", and
+ * "0.0500" are all fine.
+ */
+export function isFractionStrictlyBetweenZeroAndOne(raw: string): boolean {
+  const parsed = parseDecimal(raw);
+  if (!parsed || parsed.decimalDigits > DECIMAL_SCALE) return false;
+  return parsed.value > 0 && parsed.value < 1;
+}
+
+/**
+ * True if [raw] is a positive decimal value (no upper bound), with at most [DECIMAL_SCALE] digits
+ * after the decimal point.
+ */
+export function isPositiveDecimalString(raw: string): boolean {
+  const parsed = parseDecimal(raw);
+  if (!parsed || parsed.decimalDigits > DECIMAL_SCALE) return false;
+  return parsed.value > 0;
+}
+
+/**
+ * Converts a decimal string already known to be valid (per isFractionStrictlyBetweenZeroAndOne or
+ * isPositiveDecimalString above -- i.e. at most [DECIMAL_SCALE] decimal digits) into the exact
+ * fixed-scale string the server requires, e.g. ".05" -> "0.0500". No rounding occurs: the input is
+ * already within that precision, so this only ever pads, never truncates.
+ */
+export function toFixedDecimalString(raw: string, digits: number = DECIMAL_SCALE): string {
+  return Number(raw.trim()).toFixed(digits);
 }
 
 export function isHexColor(raw: string): boolean {
