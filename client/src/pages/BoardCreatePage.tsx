@@ -1,8 +1,9 @@
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { serializeRequestWithDecimals } from "../api/json";
 import { SPACE_TYPES, type SpaceType } from "../api/types";
+import { BoardGraphPreview } from "../components/BoardGraph";
 import { Collapsible, useOpenIds } from "../components/Collapsible";
 import { Field } from "../components/Field";
 import { Alert, ErrorSummary } from "../components/Alert";
@@ -12,6 +13,7 @@ import {
   type PathFormState,
   type SpaceFormState,
   buildCreateBoardRequest,
+  buildGraphPreview,
   emptyBoardForm,
   newDistrict,
   newPath,
@@ -34,6 +36,11 @@ export function BoardCreatePage() {
   const openSpaces = useOpenIds();
   const openPaths = useOpenIds();
   const openDistricts = useOpenIds();
+
+  const graphPreview = useMemo(
+    () => buildGraphPreview(form),
+    [form.spaces, form.paths, form.districts, form.startSpaceIndex],
+  );
 
   function addSpace() {
     const space = newSpace();
@@ -278,6 +285,15 @@ export function BoardCreatePage() {
               branchOrderError={fieldErrors[`paths.${index}.branchOrder`]}
             />
           ))}
+        </section>
+
+        <section className="card">
+          <h2>Board preview</h2>
+          <BoardGraphPreview
+            nodes={graphPreview.nodes}
+            edges={graphPreview.edges}
+            emptyMessage="Add spaces (and paths, once you have a couple) to see a preview here."
+          />
         </section>
 
         <section className="card">

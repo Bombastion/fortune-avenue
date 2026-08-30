@@ -15,21 +15,10 @@ import {
 import "@xyflow/react/dist/style.css";
 import dagre from "dagre";
 import type { BoardResponse, SpaceType } from "../api/types";
+import { SPACE_TYPE_COLORS } from "../utils/spaceColors";
 
 const NODE_WIDTH = 108;
 const NODE_HEIGHT = 60;
-
-// Fallback color per space type, used whenever a space has no district (districts carry their
-// own colorHex, which takes priority -- see nodeColor below).
-const SPACE_TYPE_COLORS: Record<SpaceType, string> = {
-  BASIC: "#8a8f98",
-  SHOP: "#c77d2e",
-  HEART: "#d1425f",
-  DIAMOND: "#2e8bc7",
-  SPADE: "#3f4750",
-  CLUB: "#3f9142",
-  BANK: "#c9a227",
-};
 
 interface BoardSpaceNodeData {
   index: number;
@@ -54,8 +43,25 @@ interface BoardPathEdgeData {
   [key: string]: unknown;
 }
 
-interface BoardGraphProps {
-  board: BoardResponse;
+// ---- Public input shape: anything that can be turned into "one node per space, one edge per
+// path" can be rendered by this component, whether that's a saved BoardResponse (see BoardGraph
+// below) or an in-progress BoardCreatePage form (see BoardCreatePage.state.ts's
+// buildGraphPreview). ----
+
+export interface BoardGraphNodeInput {
+  id: string;
+  index: number;
+  spaceType: SpaceType;
+  color: string;
+  isStart: boolean;
+  districtName?: string;
+}
+
+export interface BoardGraphEdgeInput {
+  id: string;
+  source: string;
+  target: string;
+  branchOrder: number;
 }
 
 /**
@@ -92,9 +98,10 @@ function roundedPolylinePath(points: Point[], radius = 14): string {
 }
 
 /**
- * Runs dagre's layered layout over the board's spaces/paths. Boards loop back to their start
- * space (see boardGraph.ts), so this graph isn't a DAG -- dagre still produces a readable layout
- * by picking a feedback edge set for ranking, and for edges that span multiple ranks (which every
+ * Runs dagre's layered layout over the board's spaces/paths. A finished board loops back to its
+ * start space (see boardGraph.ts) and an in-progress one can be disconnected or even cyclic in
+ * other ways, so this graph isn't necessarily a DAG -- dagre still produces a readable layout by
+ * picking a feedback edge set for ranking, and for edges that span multiple ranks (which every
  * "loop back" edge does) it routes them through a chain of dummy nodes rather than drawing them
  * straight, so the ordering pass can push that chain into a clear lane instead of through other
  * spaces. We read those dummy-node waypoints back out (via graph.edge(...).points) and hand them
@@ -113,6 +120,10 @@ function layout(
     graph.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT });
   }
   for (const edge of edges) {
+    // The label must be a real object, not `undefined` -- graphlib's setEdge treats an explicitly
+    // passed `undefined` as "the caller specified this label" (it checks arguments.length, not
+    // the value), which skips the default-label function entirely and leaves the edge with no
+    // label object at all. dagre then crashes trying to write `.points` onto it after layout.
     graph.setEdge(edge.source, edge.target, {}, edge.id);
   }
 
@@ -185,52 +196,49 @@ const nodeTypes = { boardSpace: BoardSpaceNode };
 const edgeTypes = { boardPath: BoardPathEdge };
 
 /**
- * Renders a board's spaces and paths as a directed graph: one node per space (colored by its
- * district, or by space type when it has none), one arrowed edge per path routed through dagre's
- * computed waypoints so edges hug the layout's lanes instead of cutting through other spaces. A
- * space with more than one outgoing path (a branch) gets its edges labeled with branchOrder so
- * the fork order is visible -- unbranched paths skip the label since there's nothing to
- * disambiguate.
+ * Shared renderer: one node per BoardGraphNodeInput, one arrowed edge per BoardGraphEdgeInput,
+ * routed through dagre's computed waypoints so edges hug the layout's lanes instead of cutting
+ * through other spaces. A space with more than one outgoing path (a branch) gets its edges
+ * labeled with branchOrder so the fork order is visible -- unbranched paths skip the label since
+ * there's nothing to disambiguate.
  */
-export function BoardGraph({ board }: BoardGraphProps) {
-  const districtById = useMemo(
-    () => new Map(board.districts.map((district) => [district.id, district])),
-    [board.districts],
-  );
-
+function GraphCanvas({
+  nodes: nodeInputs,
+  edges: edgeInputs,
+  emptyMessage,
+}: {
+  nodes: BoardGraphNodeInput[];
+  edges: BoardGraphEdgeInput[];
+  emptyMessage: string;
+}) {
   const outgoingCounts = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const path of board.paths) {
-      counts.set(path.from, (counts.get(path.from) ?? 0) + 1);
+    for (const edge of edgeInputs) {
+      counts.set(edge.source, (counts.get(edge.source) ?? 0) + 1);
     }
     return counts;
-  }, [board.paths]);
+  }, [edgeInputs]);
 
   const { nodes, edges } = useMemo(() => {
-    const rawNodes: Node<BoardSpaceNodeData>[] = board.spaces.map((space, index) => {
-      const district = space.districtId ? districtById.get(space.districtId) : undefined;
-      const color = district ? `#${district.colorHex}` : SPACE_TYPE_COLORS[space.spaceType];
+    const rawNodes: Node<BoardSpaceNodeData>[] = nodeInputs.map((input) => ({
+      id: input.id,
+      type: "boardSpace",
+      position: { x: 0, y: 0 },
+      data: {
+        index: input.index,
+        spaceType: input.spaceType,
+        color: input.color,
+        isStart: input.isStart,
+        districtName: input.districtName,
+      },
+    }));
 
-      return {
-        id: space.id,
-        type: "boardSpace",
-        position: { x: 0, y: 0 },
-        data: {
-          index,
-          spaceType: space.spaceType,
-          color,
-          isStart: space.id === board.startSpaceId,
-          districtName: district?.name,
-        },
-      };
-    });
-
-    const rawEdges = board.paths.map((path, index) => ({
-      id: `${path.from}-${path.to}-${path.branchOrder}-${index}`,
-      source: path.from,
-      target: path.to,
-      branched: (outgoingCounts.get(path.from) ?? 0) > 1,
-      branchOrder: path.branchOrder,
+    const rawEdges = edgeInputs.map((input) => ({
+      id: input.id,
+      source: input.source,
+      target: input.target,
+      branched: (outgoingCounts.get(input.source) ?? 0) > 1,
+      branchOrder: input.branchOrder,
     }));
 
     const { nodes: laidOutNodes, pointsByEdgeId } = layout(rawNodes, rawEdges);
@@ -246,10 +254,10 @@ export function BoardGraph({ board }: BoardGraphProps) {
     }));
 
     return { nodes: laidOutNodes, edges: finalEdges };
-  }, [board, districtById, outgoingCounts]);
+  }, [nodeInputs, edgeInputs, outgoingCounts]);
 
-  if (board.spaces.length === 0) {
-    return <p>This board has no spaces yet.</p>;
+  if (nodeInputs.length === 0) {
+    return <p>{emptyMessage}</p>;
   }
 
   return (
@@ -270,4 +278,63 @@ export function BoardGraph({ board }: BoardGraphProps) {
       </ReactFlow>
     </div>
   );
+}
+
+/**
+ * Renders a saved board's spaces and paths as a directed graph: one node per space (colored by
+ * its district, or by space type when it has none).
+ */
+export function BoardGraph({ board }: { board: BoardResponse }) {
+  const districtById = useMemo(
+    () => new Map(board.districts.map((district) => [district.id, district])),
+    [board.districts],
+  );
+
+  const nodes: BoardGraphNodeInput[] = useMemo(
+    () =>
+      board.spaces.map((space, index) => {
+        const district = space.districtId ? districtById.get(space.districtId) : undefined;
+        const color = district ? `#${district.colorHex}` : SPACE_TYPE_COLORS[space.spaceType];
+
+        return {
+          id: space.id,
+          index,
+          spaceType: space.spaceType,
+          color,
+          isStart: space.id === board.startSpaceId,
+          districtName: district?.name,
+        };
+      }),
+    [board.spaces, board.startSpaceId, districtById],
+  );
+
+  const edges: BoardGraphEdgeInput[] = useMemo(
+    () =>
+      board.paths.map((path, index) => ({
+        id: `${path.from}-${path.to}-${path.branchOrder}-${index}`,
+        source: path.from,
+        target: path.to,
+        branchOrder: path.branchOrder,
+      })),
+    [board.paths],
+  );
+
+  return <GraphCanvas nodes={nodes} edges={edges} emptyMessage="This board has no spaces yet." />;
+}
+
+/**
+ * Renders an arbitrary node/edge set built elsewhere (e.g. BoardCreatePage.state.ts's
+ * buildGraphPreview, for the live preview on the board creation page) using the same layout and
+ * styling as BoardGraph.
+ */
+export function BoardGraphPreview({
+  nodes,
+  edges,
+  emptyMessage,
+}: {
+  nodes: BoardGraphNodeInput[];
+  edges: BoardGraphEdgeInput[];
+  emptyMessage: string;
+}) {
+  return <GraphCanvas nodes={nodes} edges={edges} emptyMessage={emptyMessage} />;
 }
