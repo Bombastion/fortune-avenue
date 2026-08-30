@@ -1,23 +1,31 @@
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import { ApiError, api } from "../api/client";
 import type { UserResponse } from "../api/types";
 import { Alert, ErrorSummary } from "../components/Alert";
 import { Field } from "../components/Field";
+import { matchesUsernameQuery } from "../utils/filter";
 import { isBlank } from "../validation/rules";
 
+// Fetch-all-then-filter, same tradeoff as the board picker on the Games page: simple and fine at
+// this scale, but would need real server-side search past a few hundred users.
+const USER_LIST_PAGE_SIZE = 200;
+
 export function UsersPage() {
+  const [reloadToken, setReloadToken] = useState(0);
+
   return (
     <div className="page">
       <h1>Users</h1>
       <div className="grid grid--2">
-        <CreateUserForm />
+        <CreateUserForm onUserCreated={() => setReloadToken((t) => t + 1)} />
         <LookupUserForm />
       </div>
+      <UserSearchTable reloadToken={reloadToken} />
     </div>
   );
 }
 
-function CreateUserForm() {
+function CreateUserForm({ onUserCreated }: { onUserCreated: () => void }) {
   const [username, setUsername] = useState("");
   const [errors, setErrors] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -42,6 +50,7 @@ function CreateUserForm() {
       const user = await api.createUser({ username: username.trim() });
       setCreated(user);
       setUsername("");
+      onUserCreated();
     } catch (err) {
       setErrors([err instanceof Error ? err.message : "Something went wrong."]);
     } finally {
@@ -58,7 +67,7 @@ function CreateUserForm() {
           type="text"
           value={username}
           onChange={(event) => setUsername(event.target.value)}
-          placeholder="e.g. tyler"
+          placeholder="e.g. xXcooluser22Xx"
         />
       </Field>
       <button type="submit" className="button" disabled={submitting}>
@@ -125,5 +134,77 @@ function LookupUserForm() {
         </Alert>
       )}
     </form>
+  );
+}
+
+function UserSearchTable({ reloadToken }: { reloadToken: number }) {
+  const [users, setUsers] = useState<UserResponse[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    api
+      .listUsers(0, USER_LIST_PAGE_SIZE, "ASC")
+      .then((result) => {
+        if (!cancelled) {
+          setUsers(result.items);
+          setLoadError(null);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setLoadError(err instanceof Error ? err.message : "Could not load users.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadToken]);
+
+  const filtered = users.filter((user) => matchesUsernameQuery(user.username, query));
+
+  return (
+    <section className="card">
+      <h2>All users</h2>
+      {loadError && <Alert kind="error">{loadError}</Alert>}
+      <Field label="Search by name">
+        <input
+          type="text"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Type a username…"
+        />
+      </Field>
+      {loading ? (
+        <p>Loading…</p>
+      ) : filtered.length === 0 ? (
+        <p>{users.length === 0 ? "No users yet." : `No users match "${query}".`}</p>
+      ) : (
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Username</th>
+              <th>UUID</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((user) => (
+              <tr key={user.id}>
+                <td>{user.username}</td>
+                <td>
+                  <code>{user.id}</code>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
   );
 }

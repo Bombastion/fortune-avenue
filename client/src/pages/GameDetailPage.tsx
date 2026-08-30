@@ -1,10 +1,14 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
-import type { GameResponse, PlayerResponse } from "../api/types";
+import type { GameResponse, PlayerResponse, UserResponse } from "../api/types";
 import { Alert, ErrorSummary } from "../components/Alert";
 import { Field } from "../components/Field";
-import { isBlank } from "../validation/rules";
+import { matchesUsernameQuery } from "../utils/filter";
+
+// Same fetch-all-then-filter tradeoff as the board picker on the Games page and the users table --
+// fine at this scale, would need real server-side search past a few hundred users.
+const USER_OPTIONS_PAGE_SIZE = 200;
 
 export function GameDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -105,13 +109,35 @@ export function GameDetailPage() {
 
 function AddPlayerForm({ gameId, onPlayerAdded }: { gameId: string; onPlayerAdded: () => void }) {
   const [playerKind, setPlayerKind] = useState<"human" | "computer">("computer");
+  const [users, setUsers] = useState<UserResponse[]>([]);
+  const [usersError, setUsersError] = useState<string | null>(null);
+  const [userQuery, setUserQuery] = useState("");
   const [userId, setUserId] = useState("");
   const [errors, setErrors] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listUsers(0, USER_OPTIONS_PAGE_SIZE, "ASC")
+      .then((result) => {
+        if (!cancelled) setUsers(result.items);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setUsersError(err instanceof Error ? err.message : "Could not load users.");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const filteredUsers = users.filter((user) => matchesUsernameQuery(user.username, userQuery));
+
   function validate(): string[] {
-    if (playerKind === "human" && isBlank(userId)) {
-      return ["Enter the user id of the player to add."];
+    if (playerKind === "human" && userId === "") {
+      return ["Choose a user to add."];
     }
     return [];
   }
@@ -126,9 +152,10 @@ function AddPlayerForm({ gameId, onPlayerAdded }: { gameId: string; onPlayerAdde
     setSubmitting(true);
     try {
       await api.addPlayer(gameId, {
-        userId: playerKind === "human" ? userId.trim() : undefined,
+        userId: playerKind === "human" ? userId : undefined,
       });
       setUserId("");
+      setUserQuery("");
       onPlayerAdded();
     } catch (err) {
       setErrors([err instanceof Error ? err.message : "Something went wrong."]);
@@ -164,14 +191,40 @@ function AddPlayerForm({ gameId, onPlayerAdded }: { gameId: string; onPlayerAdde
       </div>
 
       {playerKind === "human" && (
-        <Field label="User id" hint={<>Find or create one on the <Link to="/users">Users</Link> page</>}>
-          <input
-            type="text"
-            value={userId}
-            onChange={(e) => setUserId(e.target.value)}
-            placeholder="UUID"
-          />
-        </Field>
+        <>
+          {usersError && <Alert kind="error">{usersError}</Alert>}
+          <Field
+            label="Search users"
+            hint={
+              <>
+                Don't see them? Create one on the <Link to="/users">Users</Link> page
+              </>
+            }
+          >
+            <input
+              type="text"
+              value={userQuery}
+              onChange={(event) => setUserQuery(event.target.value)}
+              placeholder="Type a username…"
+            />
+          </Field>
+          <Field label="User">
+            <select
+              value={userId}
+              onChange={(event) => setUserId(event.target.value)}
+              disabled={filteredUsers.length === 0}
+            >
+              <option value="">
+                {filteredUsers.length === 0 ? "No matching users" : "— choose a user —"}
+              </option>
+              {filteredUsers.map((user) => (
+                <option key={user.id} value={user.id}>
+                  {user.username}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </>
       )}
 
       <button type="submit" className="button button--primary" disabled={submitting}>

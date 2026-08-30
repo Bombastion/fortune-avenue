@@ -300,8 +300,8 @@ export function BoardCreatePage() {
             </div>
           </div>
           <p className="hint">
-            Districts are optional. Assign spaces to a district using the space's "District" field
-            above.
+            Districts are optional. Assign SHOP spaces to a district using that space's "District"
+            field above -- only SHOP spaces can belong to one.
           </p>
 
           {form.districts.map((district, index) => (
@@ -360,7 +360,7 @@ function SpaceItem({
 }: SpaceItemProps) {
   const summaryParts: string[] = [space.spaceType];
   if (space.spaceType === "SHOP" && space.baseValue) summaryParts.push(`value ${space.baseValue}`);
-  if (space.districtIndex !== null) {
+  if (space.spaceType === "SHOP" && space.districtIndex !== null) {
     const district = districts[space.districtIndex];
     summaryParts.push(district?.name ? district.name : `district #${space.districtIndex}`);
   }
@@ -374,46 +374,30 @@ function SpaceItem({
       onRemove={onRemove}
       hasError={!!baseValueError || !!basePricePercentageError}
     >
-      <div className="grid grid--2">
-        <Field label="Space type">
-          <select
-            value={space.spaceType}
-            onChange={(e) => {
-              const spaceType = e.target.value as SpaceType;
-              onChange(
-                spaceType === "SHOP"
-                  ? { spaceType }
-                  : { spaceType, baseValue: "", basePricePercentage: "" },
-              );
-            }}
-          >
-            {SPACE_TYPES.map((type) => (
-              <option key={type} value={type}>
-                {type}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="District">
-          <select
-            value={space.districtIndex === null ? "" : String(space.districtIndex)}
-            onChange={(e) =>
-              onChange({ districtIndex: e.target.value === "" ? null : Number(e.target.value) })
-            }
-          >
-            <option value="">— none —</option>
-            {districts.map((district, districtIndex) => (
-              <option key={district.localId} value={districtIndex}>
-                #{districtIndex}
-                {district.name ? `: ${district.name}` : ""}
-              </option>
-            ))}
-          </select>
-        </Field>
-      </div>
+      <Field label="Space type">
+        <select
+          value={space.spaceType}
+          onChange={(e) => {
+            const spaceType = e.target.value as SpaceType;
+            // Only SHOP spaces can have a baseValue/basePricePercentage/district -- clear all
+            // three when switching away from SHOP so stale values can't sneak into the request.
+            onChange(
+              spaceType === "SHOP"
+                ? { spaceType }
+                : { spaceType, baseValue: "", basePricePercentage: "", districtIndex: null },
+            );
+          }}
+        >
+          {SPACE_TYPES.map((type) => (
+            <option key={type} value={type}>
+              {type}
+            </option>
+          ))}
+        </select>
+      </Field>
 
       {space.spaceType === "SHOP" && (
-        <div className="grid grid--2">
+        <div className="grid grid--3">
           <Field label="Base value" error={baseValueError} hint="Positive whole number">
             <input
               type="text"
@@ -425,15 +409,31 @@ function SpaceItem({
           <Field
             label="Base price percentage"
             error={basePricePercentageError}
-            hint="Strictly between 0 and 1, exactly 4 digits, e.g. 0.1234"
+            hint="Strictly between 0 and 1, e.g. .05 or 0.05"
           >
             <input
               type="text"
               inputMode="decimal"
               value={space.basePricePercentage}
               onChange={(e) => onChange({ basePricePercentage: e.target.value })}
-              placeholder="0.1234"
+              placeholder=".05"
             />
+          </Field>
+          <Field label="District">
+            <select
+              value={space.districtIndex === null ? "" : String(space.districtIndex)}
+              onChange={(e) =>
+                onChange({ districtIndex: e.target.value === "" ? null : Number(e.target.value) })
+              }
+            >
+              <option value="">— none —</option>
+              {districts.map((district, districtIndex) => (
+                <option key={district.localId} value={districtIndex}>
+                  #{districtIndex}
+                  {district.name ? `: ${district.name}` : ""}
+                </option>
+              ))}
+            </select>
           </Field>
         </div>
       )}
@@ -603,14 +603,14 @@ function DistrictItem({
         <Field
           label="Minimum stock percentage"
           error={minimumStockPercentageError}
-          hint="Strictly between 0 and 1, exactly 4 digits"
+          hint="Strictly between 0 and 1, e.g. .5 or 0.5"
         >
           <input
             type="text"
             inputMode="decimal"
             value={district.minimumStockPercentage}
             onChange={(e) => onChange({ minimumStockPercentage: e.target.value })}
-            placeholder="0.5000"
+            placeholder=".5"
           />
         </Field>
       </div>
@@ -645,14 +645,14 @@ function DistrictItem({
                         type="text"
                         inputMode="decimal"
                         value={values.existingShopBoostPercentage}
-                        placeholder="0.1000"
+                        placeholder=".1"
                         onChange={(e) =>
                           onProgressionChange(level, "existingShopBoostPercentage", e.target.value)
                         }
                       />
                       {fieldErrors[`districts.${index}.progression.${level}.existing`] && (
                         <span className="field__error" role="alert">
-                          Required, positive, exactly 4 digits.
+                          Required, positive, e.g. .1 or 0.1.
                         </span>
                       )}
                     </td>
@@ -661,14 +661,14 @@ function DistrictItem({
                         type="text"
                         inputMode="decimal"
                         value={values.newShopBoostPercentage}
-                        placeholder="0.1000"
+                        placeholder=".1"
                         onChange={(e) =>
                           onProgressionChange(level, "newShopBoostPercentage", e.target.value)
                         }
                       />
                       {fieldErrors[`districts.${index}.progression.${level}.new`] && (
                         <span className="field__error" role="alert">
-                          Required, positive, exactly 4 digits.
+                          Required, positive, e.g. .1 or 0.1.
                         </span>
                       )}
                     </td>

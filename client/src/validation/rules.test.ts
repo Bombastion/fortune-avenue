@@ -1,65 +1,77 @@
 import { describe, expect, it } from "vitest";
 import {
   isBlank,
-  isFourDigitDecimalString,
-  isFourDigitFractionStrictlyBetweenZeroAndOne,
+  isFractionStrictlyBetweenZeroAndOne,
   isHexColor,
   isNonNegativeIntegerString,
-  isPositiveFourDigitDecimalString,
+  isPositiveDecimalString,
   isPositiveIntegerString,
+  toFixedDecimalString,
 } from "./rules";
 
-describe("isFourDigitDecimalString", () => {
-  it("accepts exactly 4 digits after the decimal point", () => {
-    expect(isFourDigitDecimalString("0.1234")).toBe(true);
-    expect(isFourDigitDecimalString("1.0000")).toBe(true);
-    expect(isFourDigitDecimalString("-1.2345")).toBe(true);
-  });
-
-  it("rejects the wrong number of decimal digits", () => {
-    expect(isFourDigitDecimalString("0.123")).toBe(false);
-    expect(isFourDigitDecimalString("0.12345")).toBe(false);
-    expect(isFourDigitDecimalString("0")).toBe(false);
-  });
-
-  it("rejects non-numeric input", () => {
-    expect(isFourDigitDecimalString("abc")).toBe(false);
-    expect(isFourDigitDecimalString("")).toBe(false);
-  });
-
-  it("trims surrounding whitespace before checking", () => {
-    expect(isFourDigitDecimalString("  0.1234  ")).toBe(true);
-  });
-});
-
-describe("isFourDigitFractionStrictlyBetweenZeroAndOne", () => {
-  it("accepts values strictly between 0 and 1 with exactly 4 digits", () => {
-    expect(isFourDigitFractionStrictlyBetweenZeroAndOne("0.5000")).toBe(true);
-    expect(isFourDigitFractionStrictlyBetweenZeroAndOne("0.9999")).toBe(true);
-    expect(isFourDigitFractionStrictlyBetweenZeroAndOne("0.0001")).toBe(true);
+describe("isFractionStrictlyBetweenZeroAndOne", () => {
+  it("accepts any equivalent way of writing a value strictly between 0 and 1", () => {
+    expect(isFractionStrictlyBetweenZeroAndOne(".05")).toBe(true);
+    expect(isFractionStrictlyBetweenZeroAndOne("0.05")).toBe(true);
+    expect(isFractionStrictlyBetweenZeroAndOne("0.0500")).toBe(true);
+    expect(isFractionStrictlyBetweenZeroAndOne("0.9999")).toBe(true);
   });
 
   it("rejects the boundaries and anything outside them", () => {
-    expect(isFourDigitFractionStrictlyBetweenZeroAndOne("0.0000")).toBe(false);
-    expect(isFourDigitFractionStrictlyBetweenZeroAndOne("1.0000")).toBe(false);
-    expect(isFourDigitFractionStrictlyBetweenZeroAndOne("-0.1234")).toBe(false);
-    expect(isFourDigitFractionStrictlyBetweenZeroAndOne("1.5000")).toBe(false);
+    expect(isFractionStrictlyBetweenZeroAndOne("0")).toBe(false);
+    expect(isFractionStrictlyBetweenZeroAndOne("0.0000")).toBe(false);
+    expect(isFractionStrictlyBetweenZeroAndOne("1")).toBe(false);
+    expect(isFractionStrictlyBetweenZeroAndOne("1.0000")).toBe(false);
+    expect(isFractionStrictlyBetweenZeroAndOne("-.5")).toBe(false);
+    expect(isFractionStrictlyBetweenZeroAndOne("1.5")).toBe(false);
   });
 
-  it("still rejects a value with the wrong scale even if in range", () => {
-    expect(isFourDigitFractionStrictlyBetweenZeroAndOne("0.5")).toBe(false);
+  it("rejects more than 4 decimal digits rather than rounding", () => {
+    expect(isFractionStrictlyBetweenZeroAndOne("0.12345")).toBe(false);
+  });
+
+  it("rejects non-numeric input", () => {
+    expect(isFractionStrictlyBetweenZeroAndOne("abc")).toBe(false);
+    expect(isFractionStrictlyBetweenZeroAndOne("")).toBe(false);
+    expect(isFractionStrictlyBetweenZeroAndOne("1e-2")).toBe(false);
+  });
+
+  it("trims surrounding whitespace before checking", () => {
+    expect(isFractionStrictlyBetweenZeroAndOne("  0.05  ")).toBe(true);
   });
 });
 
-describe("isPositiveFourDigitDecimalString", () => {
-  it("accepts any positive value with exactly 4 digits (no upper bound)", () => {
-    expect(isPositiveFourDigitDecimalString("0.1000")).toBe(true);
-    expect(isPositiveFourDigitDecimalString("5.0000")).toBe(true);
+describe("isPositiveDecimalString", () => {
+  it("accepts any positive value with at most 4 decimal digits (no upper bound)", () => {
+    expect(isPositiveDecimalString(".1")).toBe(true);
+    expect(isPositiveDecimalString("0.1")).toBe(true);
+    expect(isPositiveDecimalString("0.1000")).toBe(true);
+    expect(isPositiveDecimalString("5")).toBe(true);
+    expect(isPositiveDecimalString("1000000.1234")).toBe(true);
   });
 
-  it("rejects zero and negative values", () => {
-    expect(isPositiveFourDigitDecimalString("0.0000")).toBe(false);
-    expect(isPositiveFourDigitDecimalString("-0.1000")).toBe(false);
+  it("rejects zero, negative values, and more than 4 decimal digits", () => {
+    expect(isPositiveDecimalString("0")).toBe(false);
+    expect(isPositiveDecimalString("0.0000")).toBe(false);
+    expect(isPositiveDecimalString("-0.1")).toBe(false);
+    expect(isPositiveDecimalString("0.10001")).toBe(false);
+  });
+});
+
+describe("toFixedDecimalString", () => {
+  it("pads a shorter decimal out to the exact 4-digit-scale string the server requires", () => {
+    expect(toFixedDecimalString(".05")).toBe("0.0500");
+    expect(toFixedDecimalString("0.05")).toBe("0.0500");
+    expect(toFixedDecimalString("5")).toBe("5.0000");
+    expect(toFixedDecimalString(".5")).toBe("0.5000");
+  });
+
+  it("leaves an already-4-digit value unchanged", () => {
+    expect(toFixedDecimalString("0.1234")).toBe("0.1234");
+  });
+
+  it("supports a different target scale", () => {
+    expect(toFixedDecimalString("5", 2)).toBe("5.00");
   });
 });
 

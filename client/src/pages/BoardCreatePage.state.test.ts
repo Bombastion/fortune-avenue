@@ -105,7 +105,7 @@ describe("buildCreateBoardRequest", () => {
   it("trims, coerces, and shapes form state into a CreateBoardRequest", () => {
     const spaces: SpaceFormState[] = [
       { localId: "s0", spaceType: "BANK", baseValue: "", basePricePercentage: "", districtIndex: null },
-      { localId: "s1", spaceType: "SHOP", baseValue: "100", basePricePercentage: "0.1234", districtIndex: 0 },
+      { localId: "s1", spaceType: "SHOP", baseValue: "100", basePricePercentage: ".05", districtIndex: 0 },
       { localId: "s2", spaceType: "SHOP", baseValue: "200", basePricePercentage: "0.2345", districtIndex: 0 },
     ];
     const paths: PathFormState[] = [
@@ -125,19 +125,22 @@ describe("buildCreateBoardRequest", () => {
           localId: "d0",
           name: " Downtown ",
           colorHex: "1e90ff",
-          minimumStockPercentage: "0.5000",
+          minimumStockPercentage: ".5",
           progressionValues: {
-            2: { existingShopBoostPercentage: "0.1000 ", newShopBoostPercentage: " 0.2000" },
+            2: { existingShopBoostPercentage: " .1 ", newShopBoostPercentage: "0.2" },
           },
         },
       ],
     };
 
+    // basePricePercentage, minimumStockPercentage, and the boost percentages were all typed in
+    // shorthand (".05", ".5", ".1", "0.2") -- buildCreateBoardRequest is where that gets padded
+    // out to the exact 4-decimal-digit strings the server's BigDecimal fields require.
     expect(buildCreateBoardRequest(form)).toEqual({
       name: "My Board",
       spaces: [
         { spaceType: "BANK" },
-        { spaceType: "SHOP", baseValue: 100, basePricePercentage: "0.1234", districtIndex: 0 },
+        { spaceType: "SHOP", baseValue: 100, basePricePercentage: "0.0500", districtIndex: 0 },
         { spaceType: "SHOP", baseValue: 200, basePricePercentage: "0.2345", districtIndex: 0 },
       ],
       paths: [
@@ -159,6 +162,18 @@ describe("buildCreateBoardRequest", () => {
         },
       ],
     });
+  });
+
+  it("drops a stray districtIndex on a non-SHOP space rather than passing it through", () => {
+    // Shouldn't happen via the UI (the "District" field is only rendered for SHOP spaces, and
+    // switching away from SHOP clears it) or survive validateBoardForm, but building the request
+    // is defensive about it anyway rather than trusting every caller validated first.
+    const spaces: SpaceFormState[] = [
+      { localId: "s0", spaceType: "BASIC", baseValue: "", basePricePercentage: "", districtIndex: 0 },
+    ];
+    const form: BoardFormState = { ...emptyBoardForm(), spaces, startSpaceIndex: 0 };
+
+    expect(buildCreateBoardRequest(form).spaces).toEqual([{ spaceType: "BASIC" }]);
   });
 });
 
@@ -204,8 +219,8 @@ describe("validateBoardForm", () => {
   it("validates SHOP-specific fields independently of the rest of the form", () => {
     const spaces: SpaceFormState[] = [
       { localId: "s0", spaceType: "SHOP", baseValue: "", basePricePercentage: "", districtIndex: null },
-      { localId: "s1", spaceType: "SHOP", baseValue: "100", basePricePercentage: "0.5000", districtIndex: null },
-      { localId: "s2", spaceType: "BASIC", baseValue: "100", basePricePercentage: "0.5000", districtIndex: null },
+      { localId: "s1", spaceType: "SHOP", baseValue: "100", basePricePercentage: "0.5000", districtIndex: 0 },
+      { localId: "s2", spaceType: "BASIC", baseValue: "100", basePricePercentage: "0.5000", districtIndex: 0 },
     ];
     const form: BoardFormState = { ...emptyBoardForm(), spaces };
 
@@ -217,5 +232,33 @@ describe("validateBoardForm", () => {
     expect(result.fieldErrors["spaces.1.basePricePercentage"]).toBeUndefined();
     expect(result.fieldErrors["spaces.2.baseValue"]).toBeDefined();
     expect(result.fieldErrors["spaces.2.basePricePercentage"]).toBeDefined();
+  });
+
+  it("accepts shorthand decimal input, but rejects more than 4 decimal digits", () => {
+    const spaces: SpaceFormState[] = [
+      { localId: "s0", spaceType: "SHOP", baseValue: "100", basePricePercentage: ".05", districtIndex: null },
+      { localId: "s1", spaceType: "SHOP", baseValue: "100", basePricePercentage: "0.05001", districtIndex: null },
+    ];
+    const form: BoardFormState = { ...emptyBoardForm(), spaces };
+
+    const result = validateBoardForm(form);
+
+    expect(result.fieldErrors["spaces.0.basePricePercentage"]).toBeUndefined();
+    expect(result.fieldErrors["spaces.1.basePricePercentage"]).toBeDefined();
+  });
+
+  it("only lets a SHOP space belong to a district", () => {
+    const spaces: SpaceFormState[] = [
+      { localId: "s0", spaceType: "SHOP", baseValue: "100", basePricePercentage: "0.5000", districtIndex: 0 },
+      { localId: "s1", spaceType: "BASIC", baseValue: "", basePricePercentage: "", districtIndex: 0 },
+    ];
+    const form: BoardFormState = { ...emptyBoardForm(), spaces };
+
+    const result = validateBoardForm(form);
+
+    expect(result.fieldErrors["spaces.0.districtIndex"]).toBeUndefined();
+    expect(result.fieldErrors["spaces.1.districtIndex"]).toBe(
+      "Space #1: only SHOP spaces may belong to a district.",
+    );
   });
 });
