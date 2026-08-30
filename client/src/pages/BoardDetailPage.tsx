@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import type { BoardResponse } from "../api/types";
 import { Alert } from "../components/Alert";
+import { BoardGraph } from "../components/BoardGraph";
 
 export function BoardDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -53,6 +54,11 @@ export function BoardDetailPage() {
           Start a game on this board
         </Link>
       </div>
+
+      <section className="card">
+        <h2>Board graph</h2>
+        <BoardGraph board={board} />
+      </section>
 
       <div className="grid grid--3">
         <div className="card">
