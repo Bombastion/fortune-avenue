@@ -22,6 +22,8 @@ import {
   toFixedDecimalString,
 } from "../validation/rules";
 import { newLocalId } from "../utils/id";
+import { SPACE_TYPE_COLORS } from "../utils/spaceColors";
+import type { BoardGraphEdgeInput, BoardGraphNodeInput } from "../components/BoardGraph";
 
 const MIN_SPACES_REQUIRING_PROGRESSIONS = 2;
 
@@ -365,4 +367,49 @@ export function buildCreateBoardRequest(form: BoardFormState): CreateBoardReques
     promotionBonus: Number(form.promotionBonus),
     districts,
   };
+}
+
+// ---- Live preview (only call this -- never buildCreateBoardRequest -- for the in-progress
+// preview graph on this page; the two are validated very differently) ----
+
+/**
+ * Turns the in-progress form into the node/edge shape BoardGraphPreview renders. Unlike
+ * buildCreateBoardRequest, this never requires the form to be valid first: a path whose "from" or
+ * "to" hasn't been chosen yet is simply left out, and a district with a not-yet-valid colorHex
+ * just falls back to the space type's default color -- the whole point of the preview is to show
+ * the board as it's being built, including while it's still incomplete.
+ */
+export function buildGraphPreview(form: BoardFormState): {
+  nodes: BoardGraphNodeInput[];
+  edges: BoardGraphEdgeInput[];
+} {
+  const nodeIdByIndex = form.spaces.map((space) => space.localId);
+
+  const nodes: BoardGraphNodeInput[] = form.spaces.map((space, index) => {
+    const district = space.districtIndex !== null ? form.districts[space.districtIndex] : undefined;
+    const color =
+      district && isHexColor(district.colorHex)
+        ? `#${district.colorHex.toUpperCase()}`
+        : SPACE_TYPE_COLORS[space.spaceType];
+
+    return {
+      id: space.localId,
+      index,
+      spaceType: space.spaceType,
+      color,
+      isStart: index === form.startSpaceIndex,
+      districtName: district?.name || undefined,
+    };
+  });
+
+  const edges: BoardGraphEdgeInput[] = form.paths
+    .map((path) => ({
+      id: path.localId,
+      source: path.from !== null ? nodeIdByIndex[path.from] : undefined,
+      target: path.to !== null ? nodeIdByIndex[path.to] : undefined,
+      branchOrder: Number(path.branchOrder) || 0,
+    }))
+    .filter((edge): edge is BoardGraphEdgeInput => edge.source !== undefined && edge.target !== undefined);
+
+  return { nodes, edges };
 }

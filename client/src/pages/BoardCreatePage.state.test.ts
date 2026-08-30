@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   type BoardFormState,
+  type DistrictFormState,
   type PathFormState,
   type SpaceFormState,
   buildCreateBoardRequest,
+  buildGraphPreview,
   emptyBoardForm,
   removeDistrictAt,
   removeSpaceAt,
@@ -260,5 +262,54 @@ describe("validateBoardForm", () => {
     expect(result.fieldErrors["spaces.1.districtIndex"]).toBe(
       "Space #1: only SHOP spaces may belong to a district.",
     );
+  });
+});
+
+
+describe("buildGraphPreview", () => {
+  it("returns nothing for an empty form", () => {
+    expect(buildGraphPreview(emptyBoardForm())).toEqual({ nodes: [], edges: [] });
+  });
+
+  it("builds one node per space and skips paths with an unset from/to", () => {
+    const spaces: SpaceFormState[] = [
+      { localId: "s0", spaceType: "BASIC", baseValue: "", basePricePercentage: "", districtIndex: null },
+      { localId: "s1", spaceType: "BASIC", baseValue: "", basePricePercentage: "", districtIndex: null },
+    ];
+    const paths: PathFormState[] = [
+      { localId: "p0", from: 0, to: 1, branchOrder: "0" },
+      { localId: "p1", from: null, to: 1, branchOrder: "0" }, // "from" not chosen yet
+      { localId: "p2", from: 0, to: null, branchOrder: "0" }, // "to" not chosen yet
+    ];
+    const form: BoardFormState = { ...emptyBoardForm(), spaces, paths, startSpaceIndex: 0 };
+
+    const preview = buildGraphPreview(form);
+
+    expect(preview.nodes).toHaveLength(2);
+    expect(preview.nodes[0]).toMatchObject({ id: "s0", index: 0, isStart: true });
+    expect(preview.nodes[1]).toMatchObject({ id: "s1", index: 1, isStart: false });
+    expect(preview.edges).toEqual([{ id: "p0", source: "s0", target: "s1", branchOrder: 0 }]);
+  });
+
+  it("colors a SHOP space by its district once the district has a valid colorHex, otherwise falls back", () => {
+    const districts: DistrictFormState[] = [
+      { localId: "d0", name: "Uptown", colorHex: "FF00AA", minimumStockPercentage: "", progressionValues: {} },
+      { localId: "d1", name: "Midtown", colorHex: "not-a-color", minimumStockPercentage: "", progressionValues: {} },
+    ];
+    const spaces: SpaceFormState[] = [
+      { localId: "s0", spaceType: "SHOP", baseValue: "", basePricePercentage: "", districtIndex: 0 },
+      { localId: "s1", spaceType: "SHOP", baseValue: "", basePricePercentage: "", districtIndex: 1 },
+      { localId: "s2", spaceType: "BASIC", baseValue: "", basePricePercentage: "", districtIndex: null },
+    ];
+    const form: BoardFormState = { ...emptyBoardForm(), spaces, districts };
+
+    const preview = buildGraphPreview(form);
+
+    expect(preview.nodes[0]).toMatchObject({ color: "#FF00AA", districtName: "Uptown" });
+    // Midtown's colorHex isn't valid yet, but the district assignment itself is real -- the name
+    // still shows, only the swatch falls back to the space type's default color.
+    expect(preview.nodes[1]).toMatchObject({ districtName: "Midtown" });
+    expect(preview.nodes[1].color).not.toBe("#not-a-color");
+    expect(preview.nodes[2].districtName).toBeUndefined();
   });
 });
