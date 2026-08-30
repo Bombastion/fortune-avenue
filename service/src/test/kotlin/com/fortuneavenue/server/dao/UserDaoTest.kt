@@ -35,4 +35,62 @@ class UserDaoTest : DatabaseTest() {
 
         assertThat(result).isNull()
     }
+
+    private fun createUserWithUsername(username: String) = userDao.create(username)
+
+    @Test
+    fun `findPage sorts users by username ascending by default`() {
+        listOf("carol", "alice", "bob").forEach { createUserWithUsername(it) }
+
+        val page = userDao.findPage(page = 0, pageSize = 10, ascending = true)
+
+        assertThat(page.map { it.username }).containsExactly("alice", "bob", "carol")
+    }
+
+    @Test
+    fun `findPage sorts descending when ascending is false`() {
+        listOf("carol", "alice", "bob").forEach { createUserWithUsername(it) }
+
+        val page = userDao.findPage(page = 0, pageSize = 10, ascending = false)
+
+        assertThat(page.map { it.username }).containsExactly("carol", "bob", "alice")
+    }
+
+    @Test
+    fun `findPage never returns more users than pageSize`() {
+        repeat(3) { createUserWithUsername("user-$it") }
+
+        val page = userDao.findPage(page = 0, pageSize = 1, ascending = true)
+
+        assertThat(page).hasSize(1)
+    }
+
+    @Test
+    fun `findPage slices users across pages without overlap`() {
+        listOf("alice", "bob", "carol").forEach { createUserWithUsername(it) }
+
+        val firstPage = userDao.findPage(page = 0, pageSize = 2, ascending = true)
+        val secondPage = userDao.findPage(page = 1, pageSize = 2, ascending = true)
+
+        assertThat(firstPage.map { it.username }).containsExactly("alice", "bob")
+        assertThat(secondPage.map { it.username }).containsExactly("carol")
+    }
+
+    @Test
+    fun `findPage returns an empty list once past the last page`() {
+        createUserWithUsername("only-user-${Uuid.random()}")
+
+        val page = userDao.findPage(page = 1, pageSize = 10, ascending = true)
+
+        assertThat(page).isEmpty()
+    }
+
+    @Test
+    fun `count reflects exactly how many users exist`() {
+        assertThat(userDao.count()).isZero()
+
+        repeat(3) { createUserWithUsername("user-count-$it") }
+
+        assertThat(userDao.count()).isEqualTo(3)
+    }
 }

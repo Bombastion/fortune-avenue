@@ -70,6 +70,9 @@ export const api = {
 
   getUser: (id: string) => request<UserResponse>(`/users/${encodeURIComponent(id)}`),
 
+  listUsers: (page: number, pageSize: number, direction: SortDirection) =>
+    request<Page<UserResponse>>(`/users?page=${page}&pageSize=${pageSize}&direction=${direction}`),
+
   // ---- Boards ----
   /**
    * [request] is pre-serialized (see api/json.ts) rather than a plain object, so the caller keeps
