@@ -3,6 +3,8 @@ package com.fortuneavenue.server.websocket
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fortuneavenue.server.dao.PlayerDao
 import com.fortuneavenue.server.service.GameSimulationService
+import com.fortuneavenue.server.service.GameSnapshot
+import com.fortuneavenue.server.service.PendingDecisionSnapshot
 import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.uuid.Uuid
@@ -97,6 +99,15 @@ class GameWebSocketHandler(
             .add(session)
 
         send(session, ConnectedEvent(playerId = playerId.toString()))
+
+        // Hydrates a client connecting (or reconnecting) partway through a game -- without this
+        // it would only know what's happened from events broadcast from this point on. Failure
+        // here shouldn't be possible (game/playerId were just validated above) but isn't worth
+        // tearing the connection down over either way -- worst case the client just doesn't get
+        // a snapshot and relies on live events only, same as before this existed.
+        gameSimulationService.getSnapshot(gameId, playerId).onSuccess { snapshot ->
+            send(session, snapshot.toWireEvent())
+        }
     }
 
     override fun afterConnectionClosed(session: WebSocketSession, status: CloseStatus) {
@@ -299,6 +310,68 @@ class GameWebSocketHandler(
         if (event is GameSimulationService.TurnEvent.TurnEnded && event.gameOver) {
             broadcast(gameId, GameOverEvent(turnCount = event.turnNumber + 1))
         }
+    }
+
+    private fun GameSnapshot.toWireEvent(): GameStateSnapshotEvent {
+        val activePlayer = activePlayerId?.toString()
+
+        return GameStateSnapshotEvent(
+            turnOrder = turnOrder?.map { it.toString() },
+            turnNumber = turnNumber,
+            gameOver = gameOver,
+            activePlayerId = activePlayer,
+            pendingChoiceRequired =
+                (pendingDecision as? PendingDecisionSnapshot.ChoicePending)?.let {
+                    ChoiceRequiredEvent(
+                        playerId = activePlayer!!,
+                        spaceId = it.spaceId.toString(),
+                        options =
+                            it.options.map { option ->
+                                PathOptionPayload(option.toSpaceId.toString(), option.branchOrder)
+                            },
+                    )
+                },
+            pendingShopPurchaseAvailable =
+                (pendingDecision as? PendingDecisionSnapshot.ShopPurchasePending)?.let {
+                    ShopPurchaseAvailableEvent(
+                        playerId = activePlayer!!,
+                        spaceId = it.spaceId.toString(),
+                        price = it.price,
+                    )
+                },
+            pendingStockTradingAvailable =
+                (pendingDecision as? PendingDecisionSnapshot.StockTradePending)?.let {
+                    StockTradingAvailableEvent(
+                        playerId = activePlayer!!,
+                        spaceId = it.spaceId.toString(),
+                        offers =
+                            it.offers.map { offer ->
+                                StockTradeOfferPayload(
+                                    offer.districtId.toString(),
+                                    offer.pricePerShare,
+                                    offer.ownedQuantity,
+                                )
+                            },
+                    )
+                },
+            players =
+                players.map { p ->
+                    PlayerSnapshotPayload(
+                        playerId = p.playerId.toString(),
+                        ready = p.ready,
+                        currentSpaceId = p.currentSpaceId?.toString(),
+                        currentGold = p.currentGold,
+                        heldSuits = p.heldSuits,
+                        promotionCount = p.promotionCount,
+                        ownedShopSpaceIds = p.ownedShopSpaceIds.map { it.toString() },
+                        stockQuantitiesByDistrictId =
+                            p.stockHoldings.associate { it.districtId.toString() to it.quantity },
+                    )
+                },
+            shopValuesBySpaceId = shopValues.associate { it.spaceId.toString() to it.currentValue },
+            stockValuesByDistrictId =
+                stockValues.associate { it.districtId.toString() to it.currentStockValue },
+        )
     }
 
     private fun GameSimulationService.TurnEvent.toWireEvent(): GameEvent =

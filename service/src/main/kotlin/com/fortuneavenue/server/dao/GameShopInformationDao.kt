@@ -45,6 +45,14 @@ class GameShopInformationDao {
         }
     }
 
+    /** Every shop in [gameId], regardless of owner (or lack of one) -- see
+     * GameSimulationService.getSnapshot, which uses this to give a reconnecting client every
+     * shop's current value, not just the ones it happens to own. */
+    fun findAllByGame(gameId: Uuid): List<GameShopInformation> = transaction {
+        GameShopInformation.find { GameShopInformationTable.gameId eq EntityID(gameId, GamesTable) }
+            .toList()
+    }
+
     fun findByGameAndSpace(gameId: Uuid, spaceId: Uuid): GameShopInformation? = transaction {
         GameShopInformation.find {
                 (GameShopInformationTable.gameId eq EntityID(gameId, GamesTable)) and
@@ -89,8 +97,18 @@ class GameShopInformationDao {
                 .toList()
         }
 
+    /**
+     * Hands [id] to [playerId] -- but only if it's still unowned, checked and set in the same
+     * transaction so this is safe even without the per-game lock GameSimulationService's actions
+     * already serialize behind (see GameSimulationService.gameLocks): a shop only ever gets one
+     * owner. Returns null (a no-op) if it's already owned by someone -- including [playerId]
+     * themselves -- so a caller can tell a real purchase from a race it lost, rather than silently
+     * "succeeding" at rebuying something.
+     */
     fun setOwner(id: Uuid, playerId: Uuid): GameShopInformation? = transaction {
-        GameShopInformation.findById(id)?.apply { ownerId = EntityID(playerId, PlayersTable) }
+        GameShopInformation.findById(id)?.takeIf { it.ownerId == null }?.apply {
+            ownerId = EntityID(playerId, PlayersTable)
+        }
     }
 
     fun setCurrentValue(id: Uuid, currentValue: Int): GameShopInformation? = transaction {

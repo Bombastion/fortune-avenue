@@ -82,14 +82,22 @@ class GameSimulationService(
     private val computerPlayer: ComputerPlayer,
 ) {
 
-    // Guards the "has this game already started?" read-then-write in [markReady] against two
-    // players readying up (and racing to start the game / seed its shop+district info) at nearly
-    // the same instant -- each ready message is handled on its own thread, and neither
-    // GameDao.startGame nor the turnOrder check above it is otherwise atomic across threads.
-    // Keyed per game so unrelated games never contend with each other. In-memory only, which is
-    // fine: like GameWebSocketHandler's session bookkeeping, this only ever needs to coordinate
-    // within a single server instance (see GameWebSocketHandler's class doc).
-    private val gameStartLocks = ConcurrentHashMap<Uuid, Any>()
+    // Serializes every action that reads then writes a game's turn state -- markReady (racing to
+    // start the game / seed its shop+district info), and every turn-mutating action below
+    // (rollDice/choosePath/buyShop/declineShopPurchase/buyStock/sellStock/skipStockTrade). Each
+    // websocket message is handled on its own thread, and none of GameDao/PlayerDao/
+    // GameShopInformationDao's individual reads-then-writes are atomic across threads on their
+    // own -- without this, two messages for the same game arriving close together (a double
+    // click, a retried send, two tabs open as the same player) can both read the same "shop still
+    // unowned" state before either commits, and both end up buying it. Keyed per game so unrelated
+    // games never contend with each other. In-memory only, which is fine: like
+    // GameWebSocketHandler's session bookkeeping, this only ever needs to coordinate within a
+    // single server instance (see GameWebSocketHandler's class doc).
+    private val gameLocks = ConcurrentHashMap<Uuid, Any>()
+
+    /** Runs [block] holding [gameId]'s lock -- see [gameLocks]. */
+    private fun <T> withGameLock(gameId: Uuid, block: () -> T): T =
+        synchronized(gameLocks.computeIfAbsent(gameId) { Any() }, block)
 
     sealed interface ReadyOutcome {
         /** Marked ready, but not every player is (or the game already started). */
@@ -243,15 +251,15 @@ class GameSimulationService(
     }
 
     fun markReady(gameId: Uuid, playerId: Uuid): Result<ReadyOutcome> =
-        synchronized(gameStartLocks.computeIfAbsent(gameId) { Any() }) {
+        withGameLock(gameId) {
             val game =
                 gameDao.findById(gameId)
-                    ?: return@synchronized Result.failure(
+                    ?: return@withGameLock Result.failure(
                         GameNotFoundException("Game $gameId does not exist.")
                     )
             val players = playerDao.findByGameId(gameId)
             if (players.none { it.id.value == playerId }) {
-                return@synchronized Result.failure(
+                return@withGameLock Result.failure(
                     InvalidPlayerException("Player $playerId is not in game $gameId.")
                 )
             }
@@ -261,7 +269,7 @@ class GameSimulationService(
             // Turn order is only ever decided once -- a player readying up again
             // after the game has already started (e.g. on reconnect) shouldn't
             // re-shuffle it.
-            if (game.turnOrder != null) return@synchronized Result.success(ReadyOutcome.Waiting)
+            if (game.turnOrder != null) return@withGameLock Result.success(ReadyOutcome.Waiting)
 
             val (computerPlayers, humanPlayers) = players.partition { it.userId == null }
             val allHumansReady = humanPlayers.all { player ->
@@ -270,7 +278,7 @@ class GameSimulationService(
                     else playerDao.findState(player.id.value)?.status
                 status == PlayerStatus.READY
             }
-            if (!allHumansReady) return@synchronized Result.success(ReadyOutcome.Waiting)
+            if (!allHumansReady) return@withGameLock Result.success(ReadyOutcome.Waiting)
 
             // Nobody's connected to ready a computer player up themselves -- now
             // that every human is ready, do it for them so the game can start.
@@ -306,6 +314,122 @@ class GameSimulationService(
         }
 
     /**
+     * A full snapshot of [gameId] as it stands right now, from [playerId]'s point of view (they
+     * just need to be a real player in the game -- this isn't restricted to their own turn, unlike
+     * every action method below). See GameSnapshot.kt for the shape, and GameWebSocketHandler,
+     * which sends one of these to a client immediately after it connects so it doesn't have to
+     * have watched every event live to know where things stand.
+     */
+    fun getSnapshot(gameId: Uuid, playerId: Uuid): Result<GameSnapshot> {
+        val game =
+            gameDao.findById(gameId)
+                ?: return Result.failure(GameNotFoundException("Game $gameId does not exist."))
+        val players = playerDao.findByGameId(gameId)
+        if (players.none { it.id.value == playerId }) {
+            return Result.failure(InvalidPlayerException("Player $playerId is not in game $gameId."))
+        }
+        val boardGraph =
+            boardDao.findById(game.boardId.value)
+                ?: return Result.failure(
+                    GameNotFoundException("Board for game $gameId no longer exists.")
+                )
+
+        val turnOrder = game.turnOrder
+        val gameOver = isGameOver(game)
+        val activePlayerId = turnOrder?.takeIf { !gameOver }?.let { it[game.turnNumber % it.size] }
+
+        val playerSnapshots =
+            players.map { player ->
+                val state = playerDao.findState(player.id.value)
+                val stockHoldings =
+                    playerStockDao.findByPlayer(player.id.value).mapNotNull { stock ->
+                        val info =
+                            gameDistrictInformationDao.findById(
+                                stock.gameDistrictInformationId.value
+                            ) ?: return@mapNotNull null
+                        StockHoldingSnapshot(districtId = info.districtId.value, quantity = stock.quantity)
+                    }
+
+                PlayerSnapshot(
+                    playerId = player.id.value,
+                    ready = state?.status == PlayerStatus.READY,
+                    currentSpaceId =
+                        state?.currentSpaceId?.value ?: turnOrder?.let { boardGraph.board.startSpaceId },
+                    currentGold = state?.currentGold ?: 0,
+                    heldSuits = state?.heldSuits.orEmpty(),
+                    promotionCount = state?.promotionCount ?: 0,
+                    ownedShopSpaceIds =
+                        gameShopInformationDao.findOwnedByPlayer(gameId, player.id.value).map {
+                            it.spaceId.value
+                        },
+                    stockHoldings = stockHoldings,
+                )
+            }
+
+        val pendingDecision =
+            activePlayerId?.let { pendingDecisionFor(gameId, it, game, boardGraph) }
+
+        return Result.success(
+            GameSnapshot(
+                turnOrder = turnOrder,
+                turnNumber = game.turnNumber,
+                gameOver = gameOver,
+                activePlayerId = activePlayerId,
+                pendingDecision = pendingDecision,
+                players = playerSnapshots,
+                shopValues =
+                    gameShopInformationDao.findAllByGame(gameId).map {
+                        ShopValueSnapshot(it.spaceId.value, it.currentValue)
+                    },
+                stockValues =
+                    gameDistrictInformationDao.findAllByGame(gameId).map {
+                        StockValueSnapshot(it.districtId.value, it.currentStockValue)
+                    },
+            )
+        )
+    }
+
+    /**
+     * Whichever decision (if any) [playerId] -- assumed to already be [game]'s activePlayerId --
+     * currently has movement paused on, read back from persisted state rather than live from a
+     * move actually happening: [Game.pendingStockTradeSpaceId] if set (see [checkStockTrade]),
+     * otherwise [Game.currentMovementPoints] read the same way [pendingShopPurchase] (0, sitting on
+     * an unowned shop) and [advanceMovement] (>0, sitting at a branch) already do. Null if none of
+     * those match -- [playerId] just needs to roll.
+     */
+    private fun pendingDecisionFor(
+        gameId: Uuid,
+        playerId: Uuid,
+        game: Game,
+        boardGraph: BoardGraph,
+    ): PendingDecisionSnapshot? {
+        game.pendingStockTradeSpaceId?.let { spaceId ->
+            return PendingDecisionSnapshot.StockTradePending(
+                spaceId = spaceId.value,
+                offers = stockOffers(gameId, playerId),
+            )
+        }
+
+        val movementPoints = game.currentMovementPoints ?: return null
+        val spaceId = playerDao.findState(playerId)?.currentSpaceId?.value ?: return null
+
+        if (movementPoints == 0) {
+            val shop =
+                gameShopInformationDao.findByGameAndSpace(gameId, spaceId)?.takeIf {
+                    it.ownerId == null
+                } ?: return null
+            return PendingDecisionSnapshot.ShopPurchasePending(spaceId, shop.currentValue)
+        }
+
+        val outgoing = boardGraph.paths.filter { it.fromSpaceId.value == spaceId }
+        if (outgoing.size <= 1) return null
+        return PendingDecisionSnapshot.ChoicePending(
+            spaceId = spaceId,
+            options = outgoing.sortedBy { it.branchOrder }.map { PathOption(it.toSpaceId.value, it.branchOrder) },
+        )
+    }
+
+    /**
      * Rolls the die for [playerId]'s turn and moves them forward that many spaces -- automatically,
      * one at a time, until either movement runs out (ending the turn), a branch is reached and
      * paused on ([choosePath] picks up from there), a purchase decision is reached and paused on
@@ -316,13 +440,13 @@ class GameSimulationService(
      * is always at least one event (the roll) and is in order, so the caller can report each one
      * (e.g. as a broadcast per entry) as it happens.
      */
-    fun rollDice(gameId: Uuid, playerId: Uuid): Result<List<TurnEvent>> {
+    fun rollDice(gameId: Uuid, playerId: Uuid): Result<List<TurnEvent>> = withGameLock(gameId) {
         val game =
             currentTurnGame(gameId, playerId).getOrElse {
-                return Result.failure(it)
+                return@withGameLock Result.failure(it)
             }
         if (game.currentMovementPoints != null) {
-            return Result.failure(
+            return@withGameLock Result.failure(
                 InvalidTurnException(
                     "Player $playerId already rolled this turn -- choose a path to continue."
                 )
@@ -332,21 +456,21 @@ class GameSimulationService(
         val playersById = playerDao.findByGameId(gameId).associateBy { it.id.value }
         val player =
             playersById[playerId]
-                ?: return Result.failure(
+                ?: return@withGameLock Result.failure(
                     InvalidPlayerException("Player $playerId is not in game $gameId.")
                 )
         val boardGraph =
             boardDao.findById(game.boardId.value)
-                ?: return Result.failure(
+                ?: return@withGameLock Result.failure(
                     InvalidTurnException("Board for game $gameId no longer exists.")
                 )
         val state =
             playerDao.findState(playerId)
-                ?: return Result.failure(InvalidPlayerException("Player $playerId has no state."))
+                ?: return@withGameLock Result.failure(InvalidPlayerException("Player $playerId has no state."))
         val fromSpaceId =
             state.currentSpaceId?.value
                 ?: boardGraph.board.startSpaceId
-                ?: return Result.failure(
+                ?: return@withGameLock Result.failure(
                     InvalidTurnException("Board for game $gameId has no start space.")
                 )
 
@@ -363,12 +487,12 @@ class GameSimulationService(
                     roll,
                 )
                 .getOrElse {
-                    return Result.failure(it)
+                    return@withGameLock Result.failure(it)
                 }
         events += movement.events
         events += chainComputerTurns(gameId, movement, playersById)
 
-        return Result.success(events)
+        return@withGameLock Result.success(events)
     }
 
     /**
@@ -376,18 +500,18 @@ class GameSimulationService(
      * must be one of the options the pause offered -- and continuing movement (and any following
      * computer players' full turns) exactly as [rollDice] does.
      */
-    fun choosePath(gameId: Uuid, playerId: Uuid, toSpaceId: Uuid): Result<List<TurnEvent>> {
+    fun choosePath(gameId: Uuid, playerId: Uuid, toSpaceId: Uuid): Result<List<TurnEvent>> = withGameLock(gameId) {
         val game =
             currentTurnGame(gameId, playerId).getOrElse {
-                return Result.failure(it)
+                return@withGameLock Result.failure(it)
             }
         val remaining =
             game.currentMovementPoints
-                ?: return Result.failure(
+                ?: return@withGameLock Result.failure(
                     InvalidTurnException("Player $playerId hasn't rolled the dice yet.")
                 )
         if (game.pendingStockTradeSpaceId != null) {
-            return Result.failure(
+            return@withGameLock Result.failure(
                 InvalidTurnException(
                     "Player $playerId has a stock trade decision pending -- resolve it first."
                 )
@@ -397,28 +521,28 @@ class GameSimulationService(
         val playersById = playerDao.findByGameId(gameId).associateBy { it.id.value }
         val player =
             playersById[playerId]
-                ?: return Result.failure(
+                ?: return@withGameLock Result.failure(
                     InvalidPlayerException("Player $playerId is not in game $gameId.")
                 )
         val boardGraph =
             boardDao.findById(game.boardId.value)
-                ?: return Result.failure(
+                ?: return@withGameLock Result.failure(
                     InvalidTurnException("Board for game $gameId no longer exists.")
                 )
         val state =
             playerDao.findState(playerId)
-                ?: return Result.failure(InvalidPlayerException("Player $playerId has no state."))
+                ?: return@withGameLock Result.failure(InvalidPlayerException("Player $playerId has no state."))
         val currentSpaceId =
             state.currentSpaceId?.value
                 ?: boardGraph.board.startSpaceId
-                ?: return Result.failure(
+                ?: return@withGameLock Result.failure(
                     InvalidTurnException("Board for game $gameId has no start space.")
                 )
 
         val outgoing = boardGraph.paths.filter { it.fromSpaceId.value == currentSpaceId }
         val chosenPath =
             outgoing.find { it.toSpaceId.value == toSpaceId }
-                ?: return Result.failure(
+                ?: return@withGameLock Result.failure(
                     InvalidTurnException(
                         "$toSpaceId isn't a path out of player $playerId's current space."
                     )
@@ -441,7 +565,7 @@ class GameSimulationService(
 
         if (step.paused) {
             gameDao.setMovementPoints(gameId, movementPointsRemaining)
-            return Result.success(events)
+            return@withGameLock Result.success(events)
         }
 
         val movement =
@@ -455,12 +579,12 @@ class GameSimulationService(
                     movementPointsRemaining,
                 )
                 .getOrElse {
-                    return Result.failure(it)
+                    return@withGameLock Result.failure(it)
                 }
         events += movement.events
         events += chainComputerTurns(gameId, movement, playersById)
 
-        return Result.success(events)
+        return@withGameLock Result.success(events)
     }
 
     /**
@@ -473,16 +597,16 @@ class GameSimulationService(
      * DistrictValueProgressionsTable). Ends the turn afterward and chains into any following
      * computer players' turns, exactly as [rollDice]/[choosePath] do.
      */
-    fun buyShop(gameId: Uuid, playerId: Uuid): Result<List<TurnEvent>> {
+    fun buyShop(gameId: Uuid, playerId: Uuid): Result<List<TurnEvent>> = withGameLock(gameId) {
         val (game, shop, playersById) =
             pendingShopPurchase(gameId, playerId).getOrElse {
-                return Result.failure(it)
+                return@withGameLock Result.failure(it)
             }
         val gold =
             currentGold(playerId)
-                ?: return Result.failure(InvalidPlayerException("Player $playerId has no state."))
+                ?: return@withGameLock Result.failure(InvalidPlayerException("Player $playerId has no state."))
         if (gold < shop.currentValue) {
-            return Result.failure(
+            return@withGameLock Result.failure(
                 InvalidTurnException(
                     "Player $playerId can't afford this shop -- it costs ${shop.currentValue} but they only have $gold gold."
                 )
@@ -491,30 +615,30 @@ class GameSimulationService(
 
         val movement =
             endTurn(gameId, playerId, game, purchaseShop(gameId, playerId, shop)).getOrElse {
-                return Result.failure(it)
+                return@withGameLock Result.failure(it)
             }
         val events = movement.events + chainComputerTurns(gameId, movement, playersById)
 
-        return Result.success(events)
+        return@withGameLock Result.success(events)
     }
 
     /**
      * Declines the pending purchase from [TurnEvent.ShopPurchaseAvailable] and ends the turn
      * without buying.
      */
-    fun declineShopPurchase(gameId: Uuid, playerId: Uuid): Result<List<TurnEvent>> {
+    fun declineShopPurchase(gameId: Uuid, playerId: Uuid): Result<List<TurnEvent>> = withGameLock(gameId) {
         val (game, _, playersById) =
             pendingShopPurchase(gameId, playerId).getOrElse {
-                return Result.failure(it)
+                return@withGameLock Result.failure(it)
             }
 
         val movement =
             endTurn(gameId, playerId, game, emptyList()).getOrElse {
-                return Result.failure(it)
+                return@withGameLock Result.failure(it)
             }
         val events = movement.events + chainComputerTurns(gameId, movement, playersById)
 
-        return Result.success(events)
+        return@withGameLock Result.success(events)
     }
 
     /**
@@ -530,23 +654,23 @@ class GameSimulationService(
         playerId: Uuid,
         districtId: Uuid,
         quantity: Int,
-    ): Result<List<TurnEvent>> {
+    ): Result<List<TurnEvent>> = withGameLock(gameId) {
         val (game, playersById) =
             pendingStockTrade(gameId, playerId).getOrElse {
-                return Result.failure(it)
+                return@withGameLock Result.failure(it)
             }
         val purchased =
             executeBuyStock(gameId, playerId, districtId, quantity).getOrElse {
-                return Result.failure(it)
+                return@withGameLock Result.failure(it)
             }
 
         val movement =
             resumeAfterStockTrade(gameId, playerId, game, listOf(purchased)).getOrElse {
-                return Result.failure(it)
+                return@withGameLock Result.failure(it)
             }
         val events = movement.events + chainComputerTurns(gameId, movement, playersById)
 
-        return Result.success(events)
+        return@withGameLock Result.success(events)
     }
 
     /**
@@ -558,42 +682,42 @@ class GameSimulationService(
         playerId: Uuid,
         districtId: Uuid,
         quantity: Int,
-    ): Result<List<TurnEvent>> {
+    ): Result<List<TurnEvent>> = withGameLock(gameId) {
         val (game, playersById) =
             pendingStockTrade(gameId, playerId).getOrElse {
-                return Result.failure(it)
+                return@withGameLock Result.failure(it)
             }
         val sold =
             executeSellStock(gameId, playerId, districtId, quantity).getOrElse {
-                return Result.failure(it)
+                return@withGameLock Result.failure(it)
             }
 
         val movement =
             resumeAfterStockTrade(gameId, playerId, game, listOf(sold)).getOrElse {
-                return Result.failure(it)
+                return@withGameLock Result.failure(it)
             }
         val events = movement.events + chainComputerTurns(gameId, movement, playersById)
 
-        return Result.success(events)
+        return@withGameLock Result.success(events)
     }
 
     /**
      * Declines the pending trade from [TurnEvent.StockTradingAvailable] and resumes movement
      * without buying or selling anything.
      */
-    fun skipStockTrade(gameId: Uuid, playerId: Uuid): Result<List<TurnEvent>> {
+    fun skipStockTrade(gameId: Uuid, playerId: Uuid): Result<List<TurnEvent>> = withGameLock(gameId) {
         val (game, playersById) =
             pendingStockTrade(gameId, playerId).getOrElse {
-                return Result.failure(it)
+                return@withGameLock Result.failure(it)
             }
 
         val movement =
             resumeAfterStockTrade(gameId, playerId, game, emptyList()).getOrElse {
-                return Result.failure(it)
+                return@withGameLock Result.failure(it)
             }
         val events = movement.events + chainComputerTurns(gameId, movement, playersById)
 
-        return Result.success(events)
+        return@withGameLock Result.success(events)
     }
 
     /**
@@ -883,6 +1007,14 @@ class GameSimulationService(
      * player's only shop in one, have nothing to recalculate -- and since current_stock_value is
      * derived purely from shops' currentValue (see GameDistrictInformationDao), a district's stock
      * only ever needs recomputing in lockstep with that same recalculation.
+     *
+     * Every caller reaches this only after confirming [shop] is unowned (see
+     * [pendingShopPurchase]'s own `ownerId == null` filter), and every caller runs under
+     * GameSimulationService.gameLocks besides -- so [GameShopInformationDao.setOwner] declining
+     * to hand over an already-owned shop is not a path that's actually reachable here. Its return
+     * value is deliberately not checked: a non-null there would mean the lock itself has a hole,
+     * which is a bug to find and fix, not a condition for this method to degrade gracefully
+     * around.
      */
     private fun purchaseShop(
         gameId: Uuid,
