@@ -26,6 +26,7 @@ interface BoardSpaceNodeData {
   color: string;
   isStart: boolean;
   districtName?: string;
+  tokens?: PlayerToken[];
   [key: string]: unknown;
 }
 
@@ -62,6 +63,14 @@ export interface BoardGraphEdgeInput {
   source: string;
   target: string;
   branchOrder: number;
+}
+
+/** One player marker to render on whichever space it's currently on -- see GamePlayPage.tsx. */
+export interface PlayerToken {
+  id: string;
+  /** Short label shown inside the token (its first couple characters) and as its title/tooltip. */
+  label: string;
+  color: string;
 }
 
 /**
@@ -149,6 +158,8 @@ function layout(
 }
 
 function BoardSpaceNode({ data }: { data: BoardSpaceNodeData }) {
+  const tokens = data.tokens ?? [];
+
   return (
     <div
       className={`board-graph__node${data.isStart ? " board-graph__node--start" : ""}`}
@@ -161,6 +172,20 @@ function BoardSpaceNode({ data }: { data: BoardSpaceNodeData }) {
         {data.spaceType}
       </span>
       {data.isStart && <span className="board-graph__node-badge">START</span>}
+      {tokens.length > 0 && (
+        <div className="board-graph__tokens">
+          {tokens.map((token) => (
+            <span
+              key={token.id}
+              className="board-graph__token"
+              style={{ backgroundColor: token.color }}
+              title={token.label}
+            >
+              {token.label.slice(0, 2).toUpperCase()}
+            </span>
+          ))}
+        </div>
+      )}
       <Handle type="source" position={Position.Right} />
     </div>
   );
@@ -206,10 +231,15 @@ function GraphCanvas({
   nodes: nodeInputs,
   edges: edgeInputs,
   emptyMessage,
+  tokensBySpaceId,
 }: {
   nodes: BoardGraphNodeInput[];
   edges: BoardGraphEdgeInput[];
   emptyMessage: string;
+  /** Player markers to overlay on top of whichever space each is currently on. Kept out of the
+   * layout memo below -- a token moving shouldn't re-run dagre, only the structure of the board
+   * (its spaces/paths) should. */
+  tokensBySpaceId?: Record<string, PlayerToken[]>;
 }) {
   const outgoingCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -219,7 +249,7 @@ function GraphCanvas({
     return counts;
   }, [edgeInputs]);
 
-  const { nodes, edges } = useMemo(() => {
+  const { nodes: laidOutNodes, edges } = useMemo(() => {
     const rawNodes: Node<BoardSpaceNodeData>[] = nodeInputs.map((input) => ({
       id: input.id,
       type: "boardSpace",
@@ -256,6 +286,14 @@ function GraphCanvas({
     return { nodes: laidOutNodes, edges: finalEdges };
   }, [nodeInputs, edgeInputs, outgoingCounts]);
 
+  const nodes = useMemo(() => {
+    if (!tokensBySpaceId) return laidOutNodes;
+    return laidOutNodes.map((node) => ({
+      ...node,
+      data: { ...node.data, tokens: tokensBySpaceId[node.id] ?? [] },
+    }));
+  }, [laidOutNodes, tokensBySpaceId]);
+
   if (nodeInputs.length === 0) {
     return <p>{emptyMessage}</p>;
   }
@@ -284,7 +322,13 @@ function GraphCanvas({
  * Renders a saved board's spaces and paths as a directed graph: one node per space (colored by
  * its district, or by space type when it has none).
  */
-export function BoardGraph({ board }: { board: BoardResponse }) {
+export function BoardGraph({
+  board,
+  tokensBySpaceId,
+}: {
+  board: BoardResponse;
+  tokensBySpaceId?: Record<string, PlayerToken[]>;
+}) {
   const districtById = useMemo(
     () => new Map(board.districts.map((district) => [district.id, district])),
     [board.districts],
@@ -319,7 +363,14 @@ export function BoardGraph({ board }: { board: BoardResponse }) {
     [board.paths],
   );
 
-  return <GraphCanvas nodes={nodes} edges={edges} emptyMessage="This board has no spaces yet." />;
+  return (
+    <GraphCanvas
+      nodes={nodes}
+      edges={edges}
+      emptyMessage="This board has no spaces yet."
+      tokensBySpaceId={tokensBySpaceId}
+    />
+  );
 }
 
 /**

@@ -7,6 +7,7 @@ import { BoardCreatePage } from "./pages/BoardCreatePage";
 import { BoardDetailPage } from "./pages/BoardDetailPage";
 import { GamesPage } from "./pages/GamesPage";
 import { GameDetailPage } from "./pages/GameDetailPage";
+import { GamePlayPage } from "./pages/GamePlayPage";
 
 function App() {
   return (
@@ -21,6 +22,7 @@ function App() {
           <Route path="/boards/:id" element={<BoardDetailPage />} />
           <Route path="/games" element={<GamesPage />} />
           <Route path="/games/:id" element={<GameDetailPage />} />
+          <Route path="/games/:gameId/play/:playerId" element={<GamePlayPage />} />
         </Routes>
       </main>
     </BrowserRouter>

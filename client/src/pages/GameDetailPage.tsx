@@ -86,6 +86,7 @@ export function GameDetailPage() {
               <tr>
                 <th>Player id</th>
                 <th>Type</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -95,6 +96,18 @@ export function GameDetailPage() {
                     <code>{player.id}</code>
                   </td>
                   <td>{player.userId ? <code>{player.userId}</code> : "Computer opponent"}</td>
+                  <td>
+                    {player.userId ? (
+                      <Link to={`/games/${id}/play/${player.id}`} className="button button--small">
+                        Play as this player
+                      </Link>
+                    ) : (
+                      // A computer player's turns play out automatically server-side (see
+                      // GameWebSocketHandler.kt) -- there's nothing for a human to connect and do
+                      // as one, so this row just isn't a link.
+                      <span className="hint">Plays automatically</span>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

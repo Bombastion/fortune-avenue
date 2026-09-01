@@ -23,6 +23,7 @@ import java.math.BigDecimal
 import java.net.URI
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.CyclicBarrier
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import kotlin.uuid.Uuid
@@ -147,8 +148,32 @@ class GameWebSocketHandlerTest : DatabaseTest() {
             )
         }
 
-        fun nextEvent(): JsonNode =
-            events.poll(5, TimeUnit.SECONDS) ?: error("Timed out waiting for an event.")
+        /**
+         * Pops the next event, transparently skipping any "game_state" snapshot -- the handler
+         * sends one right after "connected" (and would on any future reconnect) purely to hydrate
+         * a client's local state; it's not part of the request/response flow these tests assert
+         * on, so callers shouldn't need to account for it.
+         */
+        fun nextEvent(): JsonNode {
+            while (true) {
+                val event =
+                    events.poll(5, TimeUnit.SECONDS) ?: error("Timed out waiting for an event.")
+                if (event["type"]?.asText() != "game_state") return event
+            }
+        }
+
+        /**
+         * Like [nextEvent], but returns null instead of failing the test if nothing shows up
+         * within [timeoutMs] -- for callers that need to tell "no more events are coming" apart
+         * from "an event just hasn't arrived yet", which [nextEvent]'s fixed 5-second failure
+         * timeout can't do.
+         */
+        fun pollEvent(timeoutMs: Long): JsonNode? {
+            while (true) {
+                val event = events.poll(timeoutMs, TimeUnit.MILLISECONDS) ?: return null
+                if (event["type"]?.asText() != "game_state") return event
+            }
+        }
 
         fun closeStatus(): CloseStatus = closed.get(5, TimeUnit.SECONDS)
     }
@@ -592,6 +617,94 @@ class GameWebSocketHandlerTest : DatabaseTest() {
         assertThat(client.nextEvent()["type"].asText()).isEqualTo("turn_started")
 
         val playerId = Uuid.parse(player.id)
+        assertThat(playerDao.findState(playerId)!!.currentGold).isEqualTo(board.startingGold - 300)
+        val shop =
+            gameShopInformationDao.findByGameAndSpace(Uuid.parse(game.id), Uuid.parse(shopSpaceId))
+        assertThat(shop?.ownerId?.value).isEqualTo(playerId)
+    }
+
+    @Test
+    fun `two concurrent buy_shop attempts for the same shop only let one of them buy it`() {
+        // Regression test for GameSimulationService.gameLocks: without a lock serializing every
+        // turn-mutating action (not just markReady), two buy_shop messages arriving close together
+        // could both read the shop as still unowned before either committed, and both "buy" it.
+        // Two connections for the *same* player -- two tabs open at once -- is the realistic way
+        // this race actually happens; only one player can ever be mid-purchase at a time, so a
+        // race between two *different* players was never reachable to begin with.
+        val board = createShopBoard(baseValue = 300)
+        val game = createGame(board)
+        val player = addHumanPlayer(game.id)
+        val playerId = Uuid.parse(player.id)
+
+        val clientA = RecordingClient().also { it.connect(game.id, player.id) }
+        assertThat(clientA.nextEvent()["type"].asText()).isEqualTo("connected")
+        clientA.send("ready")
+        assertThat(clientA.nextEvent()["type"].asText()).isEqualTo("player_ready")
+        assertThat(clientA.nextEvent()["type"].asText()).isEqualTo("game_started")
+        assertThat(clientA.nextEvent()["type"].asText()).isEqualTo("turn_started")
+
+        (dice as QueuedDice).enqueue(1)
+        clientA.send("roll_dice")
+        assertThat(clientA.nextEvent()["type"].asText()).isEqualTo("dice_rolled")
+        assertThat(clientA.nextEvent()["type"].asText()).isEqualTo("player_moved")
+        val pauseEvent = clientA.nextEvent()
+        assertThat(pauseEvent["type"].asText()).isEqualTo("shop_purchase_available")
+        val shopSpaceId = pauseEvent["spaceId"].asText()
+
+        val clientB = RecordingClient().also { it.connect(game.id, player.id) }
+        assertThat(clientB.nextEvent()["type"].asText()).isEqualTo("connected")
+
+        // Fire buy_shop from both connections as close to simultaneously as two real threads can
+        // manage, so this actually exercises the race gameLocks is meant to close.
+        val barrier = CyclicBarrier(2)
+        val threadA = Thread { barrier.await(); clientA.send("buy_shop") }
+        val threadB = Thread { barrier.await(); clientB.send("buy_shop") }
+        threadA.start()
+        threadB.start()
+        threadA.join(TimeUnit.SECONDS.toMillis(5))
+        threadB.join(TimeUnit.SECONDS.toMillis(5))
+
+        // Sole player, so the loser's decision is rejected outright rather than staying pending --
+        // by the time its buy_shop gets the lock, the turn has already moved on. The loser's
+        // targeted error and the winner's broadcast trio come from two different server threads,
+        // so there's no guaranteed order between them -- draining stops only once nothing new has
+        // shown up for a bit *after* turn_started, rather than the instant turn_started itself is
+        // seen, so a trailing error that lands just after it is never missed.
+        fun drainQuietly(client: RecordingClient): List<JsonNode> {
+            val events = mutableListOf<JsonNode>()
+            while (true) {
+                val sawTurnStarted = events.any { it["type"].asText() == "turn_started" }
+                val event = client.pollEvent(if (sawTurnStarted) 500 else 5_000) ?: break
+                // .add(...), not += -- JsonNode's platform (Java) nullability trips up +='s
+                // plusAssign/plus overload resolution and it ends up trying (and failing) to
+                // reassign this val instead of mutating in place.
+                events.add(event)
+                check(events.size <= 10) { "Runaway event stream on one connection: $events" }
+            }
+            check(events.any { it["type"].asText() == "turn_started" }) {
+                "Never saw turn_started: $events"
+            }
+            return events
+        }
+        val eventsA = drainQuietly(clientA)
+        val eventsB = drainQuietly(clientB)
+
+        // Both connections are sessions in the same game, so both see the same broadcast trio --
+        // exactly once each, proving the purchase itself only ever actually happened once.
+        for (events in listOf(eventsA, eventsB)) {
+            assertThat(events.count { it["type"].asText() == "shop_purchased" }).isEqualTo(1)
+            assertThat(events.count { it["type"].asText() == "turn_ended" }).isEqualTo(1)
+            assertThat(events.count { it["type"].asText() == "turn_started" }).isEqualTo(1)
+        }
+
+        // Exactly one connection was told no -- it lost the race for the shop the other one just
+        // bought (errors are only ever sent to the connection that triggered them, never
+        // broadcast).
+        val errorCounts =
+            listOf(eventsA, eventsB).map { events -> events.count { it["type"].asText() == "error" } }
+        assertThat(errorCounts.sorted()).isEqualTo(listOf(0, 1))
+
+        // Gold was deducted exactly once, not twice.
         assertThat(playerDao.findState(playerId)!!.currentGold).isEqualTo(board.startingGold - 300)
         val shop =
             gameShopInformationDao.findByGameAndSpace(Uuid.parse(game.id), Uuid.parse(shopSpaceId))

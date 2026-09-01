@@ -151,3 +151,37 @@ data class ErrorEvent(
     val message: String,
     override val type: String = "error",
 ) : GameEvent
+
+data class PlayerSnapshotPayload(
+    val playerId: String,
+    val ready: Boolean,
+    val currentSpaceId: String?,
+    val currentGold: Int,
+    val heldSuits: List<String>,
+    val promotionCount: Int,
+    val ownedShopSpaceIds: List<String>,
+    val stockQuantitiesByDistrictId: Map<String, Int>,
+)
+
+/**
+ * Sent once, right after [ConnectedEvent], so a client connecting (or reconnecting) partway
+ * through a game doesn't have to have seen every event live to know where things stand -- see
+ * GameSimulationService.getSnapshot. [pendingChoiceRequired]/[pendingShopPurchaseAvailable]/
+ * [pendingStockTradingAvailable] deliberately reuse those events' own shape (playerId and all)
+ * rather than inventing a new one, so a client can fold whichever one is non-null onto its state
+ * the exact same way it would the live event that originally caused that pause -- at most one is
+ * ever non-null, naming whatever [activePlayerId] currently has movement paused on.
+ */
+data class GameStateSnapshotEvent(
+    val turnOrder: List<String>?,
+    val turnNumber: Int,
+    val gameOver: Boolean,
+    val activePlayerId: String?,
+    val pendingChoiceRequired: ChoiceRequiredEvent? = null,
+    val pendingShopPurchaseAvailable: ShopPurchaseAvailableEvent? = null,
+    val pendingStockTradingAvailable: StockTradingAvailableEvent? = null,
+    val players: List<PlayerSnapshotPayload>,
+    val shopValuesBySpaceId: Map<String, Int>,
+    val stockValuesByDistrictId: Map<String, Int>,
+    override val type: String = "game_state",
+) : GameEvent
