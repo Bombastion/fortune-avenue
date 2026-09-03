@@ -96,9 +96,9 @@ export function initialGameState(board: BoardResponse, playerIds: string[]): Gam
   };
 }
 
-/** A player's net worth: every shop they own plus the current value of every stock they hold,
- * gold on hand deliberately excluded -- mirrors GameSimulationService.netWorth() exactly (modulo
- * shop/stock values we haven't learned yet from events, which count as 0 until we do). */
+/** A player's net worth: their gold on hand, plus every shop they own, plus the current value of
+ * every stock they hold -- mirrors GameSimulationService.netWorth() exactly (modulo shop/stock
+ * values we haven't learned yet from events, which count as 0 until we do). */
 export function netWorth(state: GameState, playerId: string): number {
   const player = state.players[playerId];
   if (!player) return 0;
@@ -111,7 +111,7 @@ export function netWorth(state: GameState, playerId: string): number {
     (sum, [districtId, quantity]) => sum + quantity * (state.stockValueByDistrictId[districtId] ?? 0),
     0,
   );
-  return shopValue + stockValue;
+  return player.gold + shopValue + stockValue;
 }
 
 /** `#3 SHOP`, or just the id if it's not on this board (shouldn't happen, but events are external

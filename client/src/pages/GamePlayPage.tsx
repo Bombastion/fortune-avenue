@@ -287,47 +287,57 @@ function ConnectedGame({
       )}
 
       <section className="card">
-        <h2>Board</h2>
-        <BoardGraph board={board} tokensBySpaceId={tokensBySpaceId} />
+        <h2>Players</h2>
+        <div className="player-status-grid">
+          {[...players]
+            .sort((a, b) => netWorth(state, b.id) - netWorth(state, a.id))
+            .map((p) => {
+              const playerState = state.players[p.id];
+              const isActive = p.id === state.activePlayerId;
+              return (
+                <div
+                  key={p.id}
+                  className={`player-status-card${isActive ? " player-status-card--active" : ""}`}
+                >
+                  <div className="player-status-card__header">
+                    <span
+                      className="board-graph__token"
+                      style={{ backgroundColor: colorById.get(p.id) }}
+                    >
+                      {playerLabel(p.id).slice(0, 2).toUpperCase()}
+                    </span>
+                    {playerLabel(p.id)}
+                  </div>
+                  <div className="player-status-card__stats">
+                    <div>
+                      <div className="player-status-card__stat-label">Net worth</div>
+                      <div className="player-status-card__stat-value">{netWorth(state, p.id)}</div>
+                    </div>
+                    <div>
+                      <div className="player-status-card__stat-label">Gold</div>
+                      <div className="player-status-card__stat-value">{playerState?.gold ?? "—"}</div>
+                    </div>
+                  </div>
+                  <div className="player-status-card__suits">
+                    {playerState && playerState.heldSuits.length > 0 ? (
+                      playerState.heldSuits.map((suit) => (
+                        <span key={suit} className="player-status-card__suit">
+                          {suit}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="player-status-card__stat-label">No suits held</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+        </div>
       </section>
 
       <section className="card">
-        <h2>Players</h2>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Player</th>
-              <th>Gold</th>
-              <th>Net worth</th>
-              <th>Suits</th>
-              <th>Promotions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {[...players]
-              .sort((a, b) => netWorth(state, b.id) - netWorth(state, a.id))
-              .map((p) => {
-                const playerState = state.players[p.id];
-                return (
-                  <tr key={p.id} className={p.id === state.activePlayerId ? "table__row--active" : undefined}>
-                    <td>
-                      <span
-                        className="board-graph__token"
-                        style={{ backgroundColor: colorById.get(p.id) }}
-                      >
-                        {playerLabel(p.id).slice(0, 2).toUpperCase()}
-                      </span>{" "}
-                      {playerLabel(p.id)}
-                    </td>
-                    <td>{playerState?.gold ?? "—"}</td>
-                    <td>{netWorth(state, p.id)}</td>
-                    <td>{playerState?.heldSuits.join(", ") || "—"}</td>
-                    <td>{playerState?.promotionCount ?? 0}</td>
-                  </tr>
-                );
-              })}
-          </tbody>
-        </table>
+        <h2>Board</h2>
+        <BoardGraph board={board} tokensBySpaceId={tokensBySpaceId} />
       </section>
 
       <section className="card">

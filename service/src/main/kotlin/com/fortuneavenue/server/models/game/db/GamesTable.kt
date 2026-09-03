@@ -35,10 +35,10 @@ object GamesTable : UuidTable("games") {
     // == 0 specifically) -- see the migration.
     val pendingStockTradeSpaceId = optReference("pending_stock_trade_space_id", BoardSpacesTable)
 
-    // Ends the game the moment any player's net worth -- every shop they own plus the current
-    // value of every stock they hold, gold on hand excluded (see
-    // GameSimulationService.netWorth) -- reaches or exceeds this, exactly as turn_number
-    // reaching max_turns already does (see GameSimulationService.endGameIfNetWorthReached).
+    // Ends the game the moment any player's net worth -- gold on hand, plus every shop they
+    // own, plus the current value of every stock they hold (see GameSimulationService.netWorth)
+    // -- reaches or exceeds this, exactly as turn_number reaching max_turns already does (see
+    // GameSimulationService.endGameIfNetWorthReached).
     // Configurable per game at creation time (see CreateGameRequest) -- no DB-level default;
     // GameService.createGame supplies 6000 when none is given, so the default lives in exactly
     // one place.

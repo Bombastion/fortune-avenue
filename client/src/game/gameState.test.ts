@@ -116,7 +116,7 @@ describe("applyGameEvent", () => {
     expect(state.stockValueByDistrictId["district-1"]).toBe(25);
   });
 
-  it("computes net worth from owned shops and stock, gold excluded", () => {
+  it("computes net worth from gold on hand plus owned shops and stock", () => {
     const state = fold([
       { type: "shop_purchased", playerId: "p1", spaceId: "space-1", price: 250 },
       {
@@ -135,8 +135,9 @@ describe("applyGameEvent", () => {
       },
     ]);
 
-    // shop now worth 300 (recalculated) + 10 shares * 20/share = 500
-    expect(netWorth(state, "p1")).toBe(300 + 200);
+    // Started with 1500 gold, spent 250 on the shop and 200 on stock -> 1050 left.
+    // Shop now worth 300 (recalculated), plus 10 shares * 20/share = 200 in stock.
+    expect(netWorth(state, "p1")).toBe(1050 + 300 + 200);
   });
 
   it("clears a pending prompt once it's resolved, but leaves it pending across an error", () => {
@@ -238,7 +239,8 @@ describe("applyGameEvent: game_state (reconnect snapshot)", () => {
       promotionCount: 1,
       ownedShopSpaceIds: ["space-1"],
     });
-    expect(netWorth(state, "p1")).toBe(400 + 5 * 30);
+    // 1200 gold on hand, plus the shop (400) plus 5 shares * 30/share = 150 in stock.
+    expect(netWorth(state, "p1")).toBe(1200 + 400 + 5 * 30);
     expect(state.pendingPrompt).toBeNull();
   });
 
