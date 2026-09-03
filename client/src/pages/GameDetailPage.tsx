@@ -74,6 +74,10 @@ export function GameDetailPage() {
           <h3>Target net worth</h3>
           <p className="stat">{game.targetNetWorth}</p>
         </div>
+        <div className="card">
+          <h3>Max turns</h3>
+          <p className="stat">{game.maxTurns}</p>
+        </div>
       </div>
 
       <section className="card">

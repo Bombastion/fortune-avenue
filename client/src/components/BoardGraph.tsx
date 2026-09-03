@@ -27,6 +27,14 @@ interface BoardSpaceNodeData {
   isStart: boolean;
   districtName?: string;
   tokens?: PlayerToken[];
+  /** The color of whichever player owns this space's shop, if any -- see BoardGraph's
+   * ownerColorBySpaceId. Tinted into the node's background rather than used as a solid fill, so
+   * the space-type/district color and text underneath stay legible. */
+  ownerColor?: string;
+  /** The display name of whichever player owns this space's shop, if any -- shown in the node's
+   * tooltip alongside the space type/district, since color alone isn't enough to tell players
+   * apart (colorblindness, more players than easily distinguishable colors). */
+  ownerLabel?: string;
   [key: string]: unknown;
 }
 
@@ -163,8 +171,18 @@ function BoardSpaceNode({ data }: { data: BoardSpaceNodeData }) {
   return (
     <div
       className={`board-graph__node${data.isStart ? " board-graph__node--start" : ""}`}
-      style={{ borderColor: data.color }}
-      title={data.districtName ? `${data.spaceType} — ${data.districtName}` : data.spaceType}
+      style={{
+        borderColor: data.color,
+        backgroundColor: data.ownerColor
+          ? `color-mix(in srgb, ${data.ownerColor} 28%, transparent)`
+          : undefined,
+      }}
+      title={[
+        data.districtName ? `${data.spaceType} — ${data.districtName}` : data.spaceType,
+        data.ownerLabel ? `Owned by ${data.ownerLabel}` : undefined,
+      ]
+        .filter(Boolean)
+        .join(" — ")}
     >
       <Handle type="target" position={Position.Left} />
       <span className="board-graph__node-index">{data.index}</span>
@@ -232,6 +250,8 @@ function GraphCanvas({
   edges: edgeInputs,
   emptyMessage,
   tokensBySpaceId,
+  ownerColorBySpaceId,
+  ownerLabelBySpaceId,
 }: {
   nodes: BoardGraphNodeInput[];
   edges: BoardGraphEdgeInput[];
@@ -240,6 +260,12 @@ function GraphCanvas({
    * layout memo below -- a token moving shouldn't re-run dagre, only the structure of the board
    * (its spaces/paths) should. */
   tokensBySpaceId?: Record<string, PlayerToken[]>;
+  /** Maps a shop's spaceId to the color of whichever player owns it. Kept out of the layout memo
+   * for the same reason tokensBySpaceId is -- a shop changing hands shouldn't re-run dagre. */
+  ownerColorBySpaceId?: Record<string, string>;
+  /** Maps a shop's spaceId to the display name of whichever player owns it -- see
+   * ownerColorBySpaceId. */
+  ownerLabelBySpaceId?: Record<string, string>;
 }) {
   const outgoingCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -287,12 +313,17 @@ function GraphCanvas({
   }, [nodeInputs, edgeInputs, outgoingCounts]);
 
   const nodes = useMemo(() => {
-    if (!tokensBySpaceId) return laidOutNodes;
+    if (!tokensBySpaceId && !ownerColorBySpaceId && !ownerLabelBySpaceId) return laidOutNodes;
     return laidOutNodes.map((node) => ({
       ...node,
-      data: { ...node.data, tokens: tokensBySpaceId[node.id] ?? [] },
+      data: {
+        ...node.data,
+        tokens: tokensBySpaceId?.[node.id] ?? [],
+        ownerColor: ownerColorBySpaceId?.[node.id],
+        ownerLabel: ownerLabelBySpaceId?.[node.id],
+      },
     }));
-  }, [laidOutNodes, tokensBySpaceId]);
+  }, [laidOutNodes, tokensBySpaceId, ownerColorBySpaceId, ownerLabelBySpaceId]);
 
   if (nodeInputs.length === 0) {
     return <p>{emptyMessage}</p>;
@@ -325,9 +356,17 @@ function GraphCanvas({
 export function BoardGraph({
   board,
   tokensBySpaceId,
+  ownerColorBySpaceId,
+  ownerLabelBySpaceId,
 }: {
   board: BoardResponse;
   tokensBySpaceId?: Record<string, PlayerToken[]>;
+  /** Maps a shop's spaceId to the color of whichever player owns it, tinted into that node's
+   * background -- see GamePlayPage.tsx, which builds this from GameState.players. */
+  ownerColorBySpaceId?: Record<string, string>;
+  /** Maps a shop's spaceId to the display name of whichever player owns it -- shown in the
+   * node's tooltip. */
+  ownerLabelBySpaceId?: Record<string, string>;
 }) {
   const districtById = useMemo(
     () => new Map(board.districts.map((district) => [district.id, district])),
@@ -369,6 +408,8 @@ export function BoardGraph({
       edges={edges}
       emptyMessage="This board has no spaces yet."
       tokensBySpaceId={tokensBySpaceId}
+      ownerColorBySpaceId={ownerColorBySpaceId}
+      ownerLabelBySpaceId={ownerLabelBySpaceId}
     />
   );
 }

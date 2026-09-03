@@ -17,9 +17,11 @@ data class GameSnapshot(
     val activePlayerId: Uuid?,
     val pendingDecision: PendingDecisionSnapshot?,
     val players: List<PlayerSnapshot>,
-    /** Every SHOP space's current value in this game, owned or not -- lets a reconnecting client
+    /**
+     * Every SHOP space's current value in this game, owned or not -- lets a reconnecting client
      * show accurate prices for shops it hasn't personally seen a shop_purchased/
-     * district_values_recalculated event for yet. */
+     * district_values_recalculated event for yet.
+     */
     val shopValues: List<ShopValueSnapshot>,
     /** Every district's current per-share stock value in this game. */
     val stockValues: List<StockValueSnapshot>,
@@ -28,8 +30,10 @@ data class GameSnapshot(
 data class PlayerSnapshot(
     val playerId: Uuid,
     val ready: Boolean,
-    /** Null only if the game hasn't started yet -- once it has, a player who hasn't moved is still
-     * sitting at the board's start space (see PlayerStatesTable.currentSpaceId). */
+    /**
+     * Null only if the game hasn't started yet -- once it has, a player who hasn't moved is still
+     * sitting at the board's start space (see PlayerStatesTable.currentSpaceId).
+     */
     val currentSpaceId: Uuid?,
     val currentGold: Int,
     val heldSuits: List<String>,
@@ -53,8 +57,11 @@ data class StockValueSnapshot(val districtId: Uuid, val currentStockValue: Int)
  * too.
  */
 sealed interface PendingDecisionSnapshot {
-    data class ChoicePending(val spaceId: Uuid, val options: List<GameSimulationService.PathOption>) :
-        PendingDecisionSnapshot
+    data class ChoicePending(
+        val spaceId: Uuid,
+        val options: List<GameSimulationService.PathOption>,
+        val movementPointsRemaining: Int,
+    ) : PendingDecisionSnapshot
 
     data class ShopPurchasePending(val spaceId: Uuid, val price: Int) : PendingDecisionSnapshot
 

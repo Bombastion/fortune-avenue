@@ -10,6 +10,7 @@ import {
   netWorth,
   spaceLabel,
   summarizeCompletedTurns,
+  winner,
   type GameState,
   type PendingPrompt,
 } from "../game/gameState";
@@ -139,6 +140,8 @@ function ConnectedGame({
     return id === playerId ? `${name} (you)` : name;
   }
 
+  const winningPlayer = useMemo(() => winner(state), [state]);
+
   const tokensBySpaceId = useMemo(() => {
     const map: Record<string, PlayerToken[]> = {};
     for (const player of Object.values(state.players)) {
@@ -152,6 +155,28 @@ function ConnectedGame({
     }
     return map;
   }, [state.players, colorById]);
+
+  const ownerColorBySpaceId = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const player of Object.values(state.players)) {
+      const color = colorById.get(player.id);
+      if (!color) continue;
+      for (const spaceId of player.ownedShopSpaceIds) {
+        map[spaceId] = color;
+      }
+    }
+    return map;
+  }, [state.players, colorById]);
+
+  const ownerLabelBySpaceId = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const player of Object.values(state.players)) {
+      for (const spaceId of player.ownedShopSpaceIds) {
+        map[spaceId] = playerLabel(player.id);
+      }
+    }
+    return map;
+  }, [state.players, displayNameById]);
 
   const myPlayer = state.players[playerId];
   const isMyTurn = state.phase === "in_progress" && state.activePlayerId === playerId;
@@ -203,6 +228,10 @@ function ConnectedGame({
         <div className="card">
           <h3>Target net worth</h3>
           <p className="stat">{game.targetNetWorth}</p>
+        </div>
+        <div className="card">
+          <h3>Max turns</h3>
+          <p className="stat">{game.maxTurns}</p>
         </div>
       </div>
 
@@ -286,48 +315,79 @@ function ConnectedGame({
         </section>
       )}
 
-      <section className="card">
-        <h2>Board</h2>
-        <BoardGraph board={board} tokensBySpaceId={tokensBySpaceId} />
-      </section>
+      {state.phase === "game_over" && winningPlayer && (
+        <section className="card card--winner">
+          <h2>Game over</h2>
+          <p className="stat">
+            <span
+              className="board-graph__token"
+              style={{ backgroundColor: colorById.get(winningPlayer.id) }}
+            >
+              {playerLabel(winningPlayer.id).slice(0, 2).toUpperCase()}
+            </span>{" "}
+            {playerLabel(winningPlayer.id)} wins!
+          </p>
+          <p className="hint">Net worth: {netWorth(state, winningPlayer.id)}</p>
+        </section>
+      )}
 
       <section className="card">
         <h2>Players</h2>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Player</th>
-              <th>Gold</th>
-              <th>Net worth</th>
-              <th>Suits</th>
-              <th>Promotions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {[...players]
-              .sort((a, b) => netWorth(state, b.id) - netWorth(state, a.id))
-              .map((p) => {
-                const playerState = state.players[p.id];
-                return (
-                  <tr key={p.id} className={p.id === state.activePlayerId ? "table__row--active" : undefined}>
-                    <td>
-                      <span
-                        className="board-graph__token"
-                        style={{ backgroundColor: colorById.get(p.id) }}
-                      >
-                        {playerLabel(p.id).slice(0, 2).toUpperCase()}
-                      </span>{" "}
-                      {playerLabel(p.id)}
-                    </td>
-                    <td>{playerState?.gold ?? "—"}</td>
-                    <td>{netWorth(state, p.id)}</td>
-                    <td>{playerState?.heldSuits.join(", ") || "—"}</td>
-                    <td>{playerState?.promotionCount ?? 0}</td>
-                  </tr>
-                );
-              })}
-          </tbody>
-        </table>
+        <div className="player-status-grid">
+          {[...players]
+            .sort((a, b) => netWorth(state, b.id) - netWorth(state, a.id))
+            .map((p) => {
+              const playerState = state.players[p.id];
+              const isActive = p.id === state.activePlayerId;
+              return (
+                <div
+                  key={p.id}
+                  className={`player-status-card${isActive ? " player-status-card--active" : ""}`}
+                >
+                  <div className="player-status-card__header">
+                    <span
+                      className="board-graph__token"
+                      style={{ backgroundColor: colorById.get(p.id) }}
+                    >
+                      {playerLabel(p.id).slice(0, 2).toUpperCase()}
+                    </span>
+                    {playerLabel(p.id)}
+                  </div>
+                  <div className="player-status-card__stats">
+                    <div>
+                      <div className="player-status-card__stat-label">Net worth</div>
+                      <div className="player-status-card__stat-value">{netWorth(state, p.id)}</div>
+                    </div>
+                    <div>
+                      <div className="player-status-card__stat-label">Gold</div>
+                      <div className="player-status-card__stat-value">{playerState?.gold ?? "—"}</div>
+                    </div>
+                  </div>
+                  <div className="player-status-card__suits">
+                    {playerState && playerState.heldSuits.length > 0 ? (
+                      playerState.heldSuits.map((suit) => (
+                        <span key={suit} className="player-status-card__suit">
+                          {suit}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="player-status-card__stat-label">No suits held</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+        </div>
+      </section>
+
+      <section className="card">
+        <h2>Board</h2>
+        <BoardGraph
+          board={board}
+          tokensBySpaceId={tokensBySpaceId}
+          ownerColorBySpaceId={ownerColorBySpaceId}
+          ownerLabelBySpaceId={ownerLabelBySpaceId}
+        />
       </section>
 
       <section className="card">
@@ -390,13 +450,25 @@ function PendingPromptPanel({
   const isMine = prompt.playerId === myPlayerId;
 
   if (!isMine) {
-    return <p className="hint">Waiting for {playerLabel(prompt.playerId)} to decide…</p>;
+    return (
+      <p className="hint">
+        Waiting for {playerLabel(prompt.playerId)} to decide
+        {prompt.kind === "choose_path"
+          ? ` (${prompt.movementPointsRemaining} ${prompt.movementPointsRemaining === 1 ? "space" : "spaces"} left to move)`
+          : ""}
+        …
+      </p>
+    );
   }
 
   if (prompt.kind === "choose_path") {
     return (
       <div className="prompt-panel">
-        <p>Choose a path from {spaceLabel(board, prompt.spaceId)}:</p>
+        <p>
+          Choose a path from {spaceLabel(board, prompt.spaceId)} --{" "}
+          {prompt.movementPointsRemaining}{" "}
+          {prompt.movementPointsRemaining === 1 ? "space" : "spaces"} left to move:
+        </p>
         <div className="section__actions">
           {prompt.options.map((option) => (
             <button

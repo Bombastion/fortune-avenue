@@ -150,9 +150,9 @@ class GameWebSocketHandlerTest : DatabaseTest() {
 
         /**
          * Pops the next event, transparently skipping any "game_state" snapshot -- the handler
-         * sends one right after "connected" (and would on any future reconnect) purely to hydrate
-         * a client's local state; it's not part of the request/response flow these tests assert
-         * on, so callers shouldn't need to account for it.
+         * sends one right after "connected" (and would on any future reconnect) purely to hydrate a
+         * client's local state; it's not part of the request/response flow these tests assert on,
+         * so callers shouldn't need to account for it.
          */
         fun nextEvent(): JsonNode {
             while (true) {
@@ -163,10 +163,10 @@ class GameWebSocketHandlerTest : DatabaseTest() {
         }
 
         /**
-         * Like [nextEvent], but returns null instead of failing the test if nothing shows up
-         * within [timeoutMs] -- for callers that need to tell "no more events are coming" apart
-         * from "an event just hasn't arrived yet", which [nextEvent]'s fixed 5-second failure
-         * timeout can't do.
+         * Like [nextEvent], but returns null instead of failing the test if nothing shows up within
+         * [timeoutMs] -- for callers that need to tell "no more events are coming" apart from "an
+         * event just hasn't arrived yet", which [nextEvent]'s fixed 5-second failure timeout can't
+         * do.
          */
         fun pollEvent(timeoutMs: Long): JsonNode? {
             while (true) {
@@ -657,8 +657,14 @@ class GameWebSocketHandlerTest : DatabaseTest() {
         // Fire buy_shop from both connections as close to simultaneously as two real threads can
         // manage, so this actually exercises the race gameLocks is meant to close.
         val barrier = CyclicBarrier(2)
-        val threadA = Thread { barrier.await(); clientA.send("buy_shop") }
-        val threadB = Thread { barrier.await(); clientB.send("buy_shop") }
+        val threadA = Thread {
+            barrier.await()
+            clientA.send("buy_shop")
+        }
+        val threadB = Thread {
+            barrier.await()
+            clientB.send("buy_shop")
+        }
         threadA.start()
         threadB.start()
         threadA.join(TimeUnit.SECONDS.toMillis(5))
@@ -701,7 +707,9 @@ class GameWebSocketHandlerTest : DatabaseTest() {
         // bought (errors are only ever sent to the connection that triggered them, never
         // broadcast).
         val errorCounts =
-            listOf(eventsA, eventsB).map { events -> events.count { it["type"].asText() == "error" } }
+            listOf(eventsA, eventsB).map { events ->
+                events.count { it["type"].asText() == "error" }
+            }
         assertThat(errorCounts.sorted()).isEqualTo(listOf(0, 1))
 
         // Gold was deducted exactly once, not twice.

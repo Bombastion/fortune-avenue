@@ -12,6 +12,7 @@ import org.springframework.stereotype.Component
 import org.springframework.web.socket.CloseStatus
 import org.springframework.web.socket.TextMessage
 import org.springframework.web.socket.WebSocketSession
+import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorator
 import org.springframework.web.socket.handler.TextWebSocketHandler
 import org.springframework.web.util.UriComponentsBuilder
 
@@ -73,6 +74,14 @@ class GameWebSocketHandler(
     private val connectionsBySession = ConcurrentHashMap<WebSocketSession, Connection>()
     private val sessionsByGame = ConcurrentHashMap<Uuid, MutableSet<WebSocketSession>>()
 
+    // Raw session -> a decorator that serializes sendMessage calls on it. Needed because a
+    // session's turn-ending broadcast and another connection's own error reply (see
+    // handleBuyShop and friends) can land on the same session from two different request
+    // threads at once when two tabs race each other -- WebSocketSession.sendMessage isn't
+    // safe for concurrent calls, and an unguarded collision here previously surfaced as later
+    // events (including turn_started) silently never reaching a connection.
+    private val concurrentSessions = ConcurrentHashMap<WebSocketSession, WebSocketSession>()
+
     override fun afterConnectionEstablished(session: WebSocketSession) {
         val params =
             UriComponentsBuilder.fromUri(
@@ -94,6 +103,12 @@ class GameWebSocketHandler(
         }
 
         connectionsBySession[session] = Connection(gameId, playerId)
+        concurrentSessions[session] =
+            ConcurrentWebSocketSessionDecorator(
+                session,
+                SEND_TIME_LIMIT_MS,
+                SEND_BUFFER_SIZE_BYTES,
+            )
         sessionsByGame
             .computeIfAbsent(gameId) { Collections.newSetFromMap(ConcurrentHashMap()) }
             .add(session)
@@ -113,6 +128,7 @@ class GameWebSocketHandler(
     override fun afterConnectionClosed(session: WebSocketSession, status: CloseStatus) {
         val connection = connectionsBySession.remove(session) ?: return
         sessionsByGame[connection.gameId]?.remove(session)
+        concurrentSessions.remove(session)
     }
 
     override fun handleTextMessage(session: WebSocketSession, message: TextMessage) {
@@ -329,6 +345,7 @@ class GameWebSocketHandler(
                             it.options.map { option ->
                                 PathOptionPayload(option.toSpaceId.toString(), option.branchOrder)
                             },
+                        movementPointsRemaining = it.movementPointsRemaining,
                     )
                 },
             pendingShopPurchaseAvailable =
@@ -404,6 +421,7 @@ class GameWebSocketHandler(
                     spaceId = spaceId.toString(),
                     options =
                         options.map { PathOptionPayload(it.toSpaceId.toString(), it.branchOrder) },
+                    movementPointsRemaining = movementPointsRemaining,
                 )
             is GameSimulationService.TurnEvent.ShopPurchaseAvailable ->
                 ShopPurchaseAvailableEvent(
@@ -459,12 +477,13 @@ class GameWebSocketHandler(
         }
 
     private fun broadcast(gameId: Uuid, event: GameEvent) {
-        sessionsByGame[gameId].orEmpty().forEach { send(it, event) }
+        sessionsByGame[gameId].orEmpty().forEach { session -> runCatching { send(session, event) } }
     }
 
     private fun send(session: WebSocketSession, event: GameEvent) {
         if (!session.isOpen) return
-        session.sendMessage(TextMessage(objectMapper.writeValueAsString(event)))
+        val target = concurrentSessions[session] ?: session
+        target.sendMessage(TextMessage(objectMapper.writeValueAsString(event)))
     }
 
     private fun WebSocketSession.reject(reason: String) {
@@ -474,5 +493,11 @@ class GameWebSocketHandler(
     companion object {
         // WebSocket close reasons are limited to 123 UTF-8 bytes by the spec.
         private const val MAX_CLOSE_REASON_LENGTH = 100
+
+        // How long a send may block waiting for a slow/stalled client before
+        // ConcurrentWebSocketSessionDecorator gives up and closes the session, and how much
+        // it'll buffer for that client in the meantime.
+        private const val SEND_TIME_LIMIT_MS = 10_000
+        private const val SEND_BUFFER_SIZE_BYTES = 512 * 1024
     }
 }

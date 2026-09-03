@@ -81,8 +81,8 @@ class GameDistrictInformationDao {
     }
 
     /**
-     * Persists [currentStockValue] as [id]'s current_stock_value, e.g. after
-     * GameSimulationService works out a post-trade price fluctuation.
+     * Persists [currentStockValue] as [id]'s current_stock_value, e.g. after GameSimulationService
+     * works out a post-trade price fluctuation.
      */
     fun setCurrentStockValue(id: Uuid, currentStockValue: Int): GameDistrictInformation? =
         transaction {
@@ -92,9 +92,8 @@ class GameDistrictInformationDao {
         }
 
     /**
-     * The seeded row itself, e.g. to look up a district's current_stock_value from a
-     * PlayerStock's gameDistrictInformationId (see GameSimulationService.netWorth). Null if [id]
-     * doesn't exist.
+     * The seeded row itself, e.g. to look up a district's current_stock_value from a PlayerStock's
+     * gameDistrictInformationId (see GameSimulationService.netWorth). Null if [id] doesn't exist.
      */
     fun findById(id: Uuid): GameDistrictInformation? = transaction {
         GameDistrictInformation.findById(id)

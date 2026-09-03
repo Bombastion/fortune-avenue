@@ -578,6 +578,7 @@ class GameSimulationServiceTest {
                         GameSimulationService.PathOption(branchC, 0),
                         GameSimulationService.PathOption(branchD, 1),
                     ),
+                    movementPointsRemaining = 1,
                 ),
             )
         verify(gameDao).setMovementPoints(gameId, 1)

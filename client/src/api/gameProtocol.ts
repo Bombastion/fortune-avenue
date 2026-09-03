@@ -94,6 +94,8 @@ export interface ChoiceRequiredEvent {
   playerId: string;
   spaceId: string;
   options: PathOptionPayload[];
+  /** How many spaces the player still has left to move after whichever option they pick. */
+  movementPointsRemaining: number;
 }
 
 export interface ShopPurchaseAvailableEvent {

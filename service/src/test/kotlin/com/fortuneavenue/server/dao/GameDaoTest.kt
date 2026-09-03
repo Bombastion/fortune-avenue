@@ -59,6 +59,14 @@ class GameDaoTest : DatabaseTest() {
     }
 
     @Test
+    fun `create persists whatever maxTurns it's given`() {
+        val created = gameDao.create(createBoardId(), 6000, 25)
+
+        assertThat(created.maxTurns).isEqualTo(25)
+        assertThat(gameDao.findById(created.id.value)!!.maxTurns).isEqualTo(25)
+    }
+
+    @Test
     fun `setMovementPoints records remaining movement`() {
         val game = gameDao.create(createBoardId(), 6000)
 

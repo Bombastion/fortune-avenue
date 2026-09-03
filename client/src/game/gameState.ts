@@ -24,7 +24,13 @@ export interface PlayerGameState {
 }
 
 export type PendingPrompt =
-  | { kind: "choose_path"; playerId: string; spaceId: string; options: PathOptionPayload[] }
+  | {
+      kind: "choose_path";
+      playerId: string;
+      spaceId: string;
+      options: PathOptionPayload[];
+      movementPointsRemaining: number;
+    }
   | { kind: "shop_purchase"; playerId: string; spaceId: string; price: number }
   | { kind: "stock_trade"; playerId: string; spaceId: string; offers: StockTradeOfferPayload[] };
 
@@ -96,9 +102,9 @@ export function initialGameState(board: BoardResponse, playerIds: string[]): Gam
   };
 }
 
-/** A player's net worth: every shop they own plus the current value of every stock they hold,
- * gold on hand deliberately excluded -- mirrors GameSimulationService.netWorth() exactly (modulo
- * shop/stock values we haven't learned yet from events, which count as 0 until we do). */
+/** A player's net worth: their gold on hand, plus every shop they own, plus the current value of
+ * every stock they hold -- mirrors GameSimulationService.netWorth() exactly (modulo shop/stock
+ * values we haven't learned yet from events, which count as 0 until we do). */
 export function netWorth(state: GameState, playerId: string): number {
   const player = state.players[playerId];
   if (!player) return 0;
@@ -111,7 +117,29 @@ export function netWorth(state: GameState, playerId: string): number {
     (sum, [districtId, quantity]) => sum + quantity * (state.stockValueByDistrictId[districtId] ?? 0),
     0,
   );
-  return shopValue + stockValue;
+  return player.gold + shopValue + stockValue;
+}
+
+/** The player with the highest net worth once the game is over -- ties are broken by whoever
+ * comes first in turnOrder, an arbitrary but stable choice, since the server doesn't record a
+ * single "winner" itself (see GameSimulationService: it only ever records *when* a game ended,
+ * via Game.endedOnTurn, not who won). Null before the game is over, or if there are no players. */
+export function winner(state: GameState): PlayerGameState | null {
+  if (state.phase !== "game_over") return null;
+
+  const orderedIds = state.turnOrder ?? Object.keys(state.players);
+  let best: PlayerGameState | null = null;
+  let bestNetWorth = -Infinity;
+  for (const id of orderedIds) {
+    const player = state.players[id];
+    if (!player) continue;
+    const playerNetWorth = netWorth(state, id);
+    if (playerNetWorth > bestNetWorth) {
+      best = player;
+      bestNetWorth = playerNetWorth;
+    }
+  }
+  return best;
 }
 
 /** `#3 SHOP`, or just the id if it's not on this board (shouldn't happen, but events are external
@@ -230,6 +258,7 @@ export function applyGameEvent(state: GameState, event: GameEvent): GameState {
           playerId: event.playerId,
           spaceId: event.spaceId,
           options: event.options,
+          movementPointsRemaining: event.movementPointsRemaining,
         },
       };
 

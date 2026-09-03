@@ -45,9 +45,11 @@ class GameShopInformationDao {
         }
     }
 
-    /** Every shop in [gameId], regardless of owner (or lack of one) -- see
-     * GameSimulationService.getSnapshot, which uses this to give a reconnecting client every
-     * shop's current value, not just the ones it happens to own. */
+    /**
+     * Every shop in [gameId], regardless of owner (or lack of one) -- see
+     * GameSimulationService.getSnapshot, which uses this to give a reconnecting client every shop's
+     * current value, not just the ones it happens to own.
+     */
     fun findAllByGame(gameId: Uuid): List<GameShopInformation> = transaction {
         GameShopInformation.find { GameShopInformationTable.gameId eq EntityID(gameId, GamesTable) }
             .toList()
@@ -106,9 +108,9 @@ class GameShopInformationDao {
      * "succeeding" at rebuying something.
      */
     fun setOwner(id: Uuid, playerId: Uuid): GameShopInformation? = transaction {
-        GameShopInformation.findById(id)?.takeIf { it.ownerId == null }?.apply {
-            ownerId = EntityID(playerId, PlayersTable)
-        }
+        GameShopInformation.findById(id)
+            ?.takeIf { it.ownerId == null }
+            ?.apply { ownerId = EntityID(playerId, PlayersTable) }
     }
 
     fun setCurrentValue(id: Uuid, currentValue: Int): GameShopInformation? = transaction {
