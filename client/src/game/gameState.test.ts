@@ -8,6 +8,7 @@ import {
   netWorth,
   spaceLabel,
   summarizeCompletedTurns,
+  winner,
 } from "./gameState";
 
 function board(): BoardResponse {
@@ -329,6 +330,41 @@ describe("applyGameEvent: game_state (reconnect snapshot)", () => {
       },
     ]);
     expect(over.phase).toBe("game_over");
+  });
+});
+
+describe("winner", () => {
+  it("is null before the game is over", () => {
+    const state = fold([
+      { type: "game_started", turnOrder: ["p1", "p2"] },
+      { type: "shop_purchased", playerId: "p1", spaceId: "space-1", price: 250 },
+    ]);
+
+    expect(winner(state)).toBeNull();
+  });
+
+  it("picks whoever has the highest net worth once the game ends", () => {
+    const state = fold([
+      { type: "game_started", turnOrder: ["p1", "p2"] },
+      // p1: 1500 - 250 = 1250 gold, plus a 250 shop = 1500 net worth.
+      { type: "shop_purchased", playerId: "p1", spaceId: "space-1", price: 250 },
+      // p2: 1500 gold untouched = 1500 net worth, then 300 more from a promotion payout.
+      { type: "promoted", playerId: "p2", spaceId: "space-2", goldAwarded: 300 },
+      { type: "game_over", turnCount: 10 },
+    ]);
+
+    expect(winner(state)?.id).toBe("p2");
+  });
+
+  it("breaks a net-worth tie by turn order", () => {
+    const state = fold([
+      { type: "game_started", turnOrder: ["p1", "p2"] },
+      { type: "game_over", turnCount: 10 },
+    ]);
+
+    // Both players are still sitting on the same starting gold with nothing else -- p1 comes
+    // first in turnOrder, so it wins the tie.
+    expect(winner(state)?.id).toBe("p1");
   });
 });
 

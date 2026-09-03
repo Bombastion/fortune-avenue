@@ -125,6 +125,47 @@ class GameControllerTest : DatabaseTest() {
     }
 
     @Test
+    fun `creating a game without a maxTurns defaults it to 10`() {
+        val board = createBoard()
+
+        val response =
+            restTemplate.postForEntity<GameResponse>(
+                "/games",
+                CreateGameRequest(boardId = board.id),
+            )
+
+        assertThat(response.body?.maxTurns).isEqualTo(10)
+    }
+
+    @Test
+    fun `creating a game with a maxTurns persists it`() {
+        val board = createBoard()
+
+        val response =
+            restTemplate.postForEntity<GameResponse>(
+                "/games",
+                CreateGameRequest(boardId = board.id, maxTurns = 25),
+            )
+
+        assertThat(response.statusCode).isEqualTo(HttpStatus.CREATED)
+        assertThat(response.body?.maxTurns).isEqualTo(25)
+    }
+
+    @Test
+    fun `creating a game with a non-positive maxTurns returns 400 with an explanatory message`() {
+        val board = createBoard()
+
+        val response =
+            restTemplate.postForEntity<ErrorResponse>(
+                "/games",
+                CreateGameRequest(boardId = board.id, maxTurns = 0),
+            )
+
+        assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
+        assertThat(response.body?.message).isNotBlank()
+    }
+
+    @Test
     fun `creating a game for a board that doesn't exist returns 400 with an explanatory message`() {
         val response =
             restTemplate.postForEntity<ErrorResponse>(

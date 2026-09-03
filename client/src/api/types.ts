@@ -120,12 +120,14 @@ export interface Page<T> {
 export interface CreateGameRequest {
   boardId: string;
   targetNetWorth?: number;
+  maxTurns?: number;
 }
 
 export interface GameResponse {
   id: string;
   boardId: string;
   targetNetWorth: number;
+  maxTurns: number;
 }
 
 // ---- Players ----

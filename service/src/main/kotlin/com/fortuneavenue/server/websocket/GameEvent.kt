@@ -67,6 +67,7 @@ data class ChoiceRequiredEvent(
     val playerId: String,
     val spaceId: String,
     val options: List<PathOptionPayload>,
+    val movementPointsRemaining: Int,
     override val type: String = "choice_required",
 ) : GameEvent
 
@@ -164,8 +165,8 @@ data class PlayerSnapshotPayload(
 )
 
 /**
- * Sent once, right after [ConnectedEvent], so a client connecting (or reconnecting) partway
- * through a game doesn't have to have seen every event live to know where things stand -- see
+ * Sent once, right after [ConnectedEvent], so a client connecting (or reconnecting) partway through
+ * a game doesn't have to have seen every event live to know where things stand -- see
  * GameSimulationService.getSnapshot. [pendingChoiceRequired]/[pendingShopPurchaseAvailable]/
  * [pendingStockTradingAvailable] deliberately reuse those events' own shape (playerId and all)
  * rather than inventing a new one, so a client can fold whichever one is non-null onto its state

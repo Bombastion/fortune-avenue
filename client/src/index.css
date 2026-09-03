@@ -92,6 +92,17 @@ body {
   margin: 0;
 }
 
+.card--winner {
+  border-color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 8%, transparent);
+}
+
+.card--winner .stat {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .grid {
   display: grid;
   gap: 1rem;

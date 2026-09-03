@@ -6,6 +6,7 @@ data class GameResponse(
     val id: String,
     val boardId: String,
     val targetNetWorth: Int,
+    val maxTurns: Int,
 )
 
 fun Game.toResponse(): GameResponse =
@@ -13,4 +14,5 @@ fun Game.toResponse(): GameResponse =
         id = id.value.toString(),
         boardId = boardId.value.toString(),
         targetNetWorth = targetNetWorth,
+        maxTurns = maxTurns,
     )

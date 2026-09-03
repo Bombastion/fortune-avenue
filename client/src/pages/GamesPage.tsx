@@ -28,6 +28,8 @@ function CreateGameForm() {
   const [manualBoardId, setManualBoardId] = useState("");
   const [useCustomTarget, setUseCustomTarget] = useState(false);
   const [targetNetWorth, setTargetNetWorth] = useState("6000");
+  const [useCustomMaxTurns, setUseCustomMaxTurns] = useState(false);
+  const [maxTurns, setMaxTurns] = useState("10");
   const [errors, setErrors] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
@@ -55,6 +57,9 @@ function CreateGameForm() {
     if (useCustomTarget && !isPositiveIntegerString(targetNetWorth)) {
       problems.push("Target net worth must be a positive whole number.");
     }
+    if (useCustomMaxTurns && !isPositiveIntegerString(maxTurns)) {
+      problems.push("Number of turns must be a positive whole number.");
+    }
     return problems;
   }
 
@@ -70,6 +75,7 @@ function CreateGameForm() {
       const game = await api.createGame({
         boardId: (boardId || manualBoardId).trim(),
         targetNetWorth: useCustomTarget ? Number(targetNetWorth) : undefined,
+        maxTurns: useCustomMaxTurns ? Number(maxTurns) : undefined,
       });
       navigate(`/games/${game.id}`);
     } catch (err) {
@@ -127,6 +133,26 @@ function CreateGameForm() {
             inputMode="numeric"
             value={targetNetWorth}
             onChange={(e) => setTargetNetWorth(e.target.value)}
+          />
+        </Field>
+      )}
+
+      <label className="checkbox">
+        <input
+          type="checkbox"
+          checked={useCustomMaxTurns}
+          onChange={(e) => setUseCustomMaxTurns(e.target.checked)}
+        />
+        Set a custom number of turns (defaults to 10)
+      </label>
+
+      {useCustomMaxTurns && (
+        <Field label="Number of turns" hint="Positive whole number">
+          <input
+            type="text"
+            inputMode="numeric"
+            value={maxTurns}
+            onChange={(e) => setMaxTurns(e.target.value)}
           />
         </Field>
       )}

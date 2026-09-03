@@ -69,6 +69,31 @@ class GameServiceTest {
     }
 
     @Test
+    fun `createGame passes a given maxTurns through to the DAO`() {
+        val boardId = Uuid.random()
+        given(boardDao.findById(boardId)).willReturn(mock(BoardGraph::class.java))
+        val createdGame = mock(Game::class.java)
+        given(gameDao.create(boardId, 6000, 20)).willReturn(createdGame)
+
+        val result = gameService.createGame(boardId, maxTurns = 20)
+
+        assertThat(result.isSuccess).isTrue()
+        assertThat(result.getOrNull()).isSameAs(createdGame)
+    }
+
+    @Test
+    fun `createGame rejects a maxTurns that isn't a positive integer`() {
+        val boardId = Uuid.random()
+        given(boardDao.findById(boardId)).willReturn(mock(BoardGraph::class.java))
+
+        val result = gameService.createGame(boardId, maxTurns = 0)
+
+        assertThat(result.isFailure).isTrue()
+        assertThat(result.exceptionOrNull()).isInstanceOf(InvalidGameException::class.java)
+        verifyNoInteractions(gameDao)
+    }
+
+    @Test
     fun `createGame rejects a boardId that doesn't belong to a real board`() {
         val boardId = Uuid.random()
         given(boardDao.findById(boardId)).willReturn(null)

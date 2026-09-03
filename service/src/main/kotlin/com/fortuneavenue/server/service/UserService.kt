@@ -25,7 +25,11 @@ class UserService(private val userDao: UserDao) {
         }
 
         val items =
-            userDao.findPage(page = page, pageSize = pageSize, ascending = direction == SortDirection.ASC)
+            userDao.findPage(
+                page = page,
+                pageSize = pageSize,
+                ascending = direction == SortDirection.ASC,
+            )
         val totalItems = userDao.count()
 
         return Result.success(

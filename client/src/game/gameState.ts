@@ -24,7 +24,13 @@ export interface PlayerGameState {
 }
 
 export type PendingPrompt =
-  | { kind: "choose_path"; playerId: string; spaceId: string; options: PathOptionPayload[] }
+  | {
+      kind: "choose_path";
+      playerId: string;
+      spaceId: string;
+      options: PathOptionPayload[];
+      movementPointsRemaining: number;
+    }
   | { kind: "shop_purchase"; playerId: string; spaceId: string; price: number }
   | { kind: "stock_trade"; playerId: string; spaceId: string; offers: StockTradeOfferPayload[] };
 
@@ -112,6 +118,28 @@ export function netWorth(state: GameState, playerId: string): number {
     0,
   );
   return player.gold + shopValue + stockValue;
+}
+
+/** The player with the highest net worth once the game is over -- ties are broken by whoever
+ * comes first in turnOrder, an arbitrary but stable choice, since the server doesn't record a
+ * single "winner" itself (see GameSimulationService: it only ever records *when* a game ended,
+ * via Game.endedOnTurn, not who won). Null before the game is over, or if there are no players. */
+export function winner(state: GameState): PlayerGameState | null {
+  if (state.phase !== "game_over") return null;
+
+  const orderedIds = state.turnOrder ?? Object.keys(state.players);
+  let best: PlayerGameState | null = null;
+  let bestNetWorth = -Infinity;
+  for (const id of orderedIds) {
+    const player = state.players[id];
+    if (!player) continue;
+    const playerNetWorth = netWorth(state, id);
+    if (playerNetWorth > bestNetWorth) {
+      best = player;
+      bestNetWorth = playerNetWorth;
+    }
+  }
+  return best;
 }
 
 /** `#3 SHOP`, or just the id if it's not on this board (shouldn't happen, but events are external
@@ -230,6 +258,7 @@ export function applyGameEvent(state: GameState, event: GameEvent): GameState {
           playerId: event.playerId,
           spaceId: event.spaceId,
           options: event.options,
+          movementPointsRemaining: event.movementPointsRemaining,
         },
       };
 

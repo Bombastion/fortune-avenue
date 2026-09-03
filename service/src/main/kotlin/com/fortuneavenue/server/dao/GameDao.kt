@@ -11,10 +11,17 @@ import org.springframework.stereotype.Repository
 @Repository
 class GameDao {
 
-    fun create(boardId: Uuid, targetNetWorth: Int): Game = transaction {
+    /**
+     * [maxTurns] defaults to 10 -- GamesTable itself also defaults max_turns to 10 at the DB
+     * level (a safety net for any insert that bypasses this method), but resolving it here too,
+     * exactly like [targetNetWorth], keeps both defaults visible in the one place a caller
+     * actually looks.
+     */
+    fun create(boardId: Uuid, targetNetWorth: Int, maxTurns: Int = 10): Game = transaction {
         Game.new {
             this.boardId = EntityID(boardId, BoardsTable)
             this.targetNetWorth = targetNetWorth
+            this.maxTurns = maxTurns
         }
     }
 
@@ -53,9 +60,7 @@ class GameDao {
         }
     }
 
-    /**
-     * Records the turn number [id] actually ended on
-     */
+    /** Records the turn number [id] actually ended on */
     fun setEndedOnTurn(id: Uuid, turnNumber: Int): Game? = transaction {
         Game.findById(id)?.apply { endedOnTurn = turnNumber }
     }
