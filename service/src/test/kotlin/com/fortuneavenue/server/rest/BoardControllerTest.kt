@@ -236,8 +236,8 @@ class BoardControllerTest : DatabaseTest() {
                                     listOf(
                                         CreateDistrictProgressionRequest(
                                             2,
-                                            BigDecimal("0.1000"),
-                                            BigDecimal("0.1500"),
+                                            BigDecimal("1.1000"),
+                                            BigDecimal("1.1500"),
                                         )
                                     ),
                             )
@@ -258,9 +258,9 @@ class BoardControllerTest : DatabaseTest() {
         assertThat(district.progressions).hasSize(1)
         val progression = district.progressions.single()
         assertThat(progression.ownedShopCount).isEqualTo(2)
-        assertThat(progression.existingShopBoostPercentage)
-            .isEqualByComparingTo(BigDecimal("0.1000"))
-        assertThat(progression.newShopBoostPercentage).isEqualByComparingTo(BigDecimal("0.1500"))
+        assertThat(progression.priceMultiplier)
+            .isEqualByComparingTo(BigDecimal("1.1000"))
+        assertThat(progression.maxCapitalMultiplier).isEqualByComparingTo(BigDecimal("1.1500"))
     }
 
     @Test

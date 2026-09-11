@@ -56,9 +56,9 @@ export interface GameState {
   // activePlayerId over).
   lastRoll: { playerId: string; roll: number } | null;
   players: Record<string, PlayerGameState>;
-  // A shop's value starts out unknown to us (the server computes it from baseValue/
-  // basePricePercentage plus district ownership boosts we don't replicate) until either it's
-  // bought (shop_purchased.price) or its district recalculates (district_values_recalculated).
+  // A shop's value starts out unknown to us until it's bought (shop_purchased.price) -- it never
+  // changes after that from here (only investment can change it server-side, and that's not
+  // wired up to the client yet).
   shopCurrentValueBySpaceId: Record<string, number>;
   // Same idea for a district's per-share stock price, learned from whichever of
   // stock_trading_available/stock_purchased/stock_sold we've seen most recently for it.
@@ -292,17 +292,6 @@ export function applyGameEvent(state: GameState, event: GameEvent): GameState {
         })),
       };
 
-    case "district_values_recalculated":
-      return {
-        ...state,
-        log,
-        pendingPrompt: null,
-        shopCurrentValueBySpaceId: {
-          ...state.shopCurrentValueBySpaceId,
-          ...event.newValuesBySpaceId,
-        },
-      };
-
     case "stock_trading_available": {
       const stockValueByDistrictId = { ...state.stockValueByDistrictId };
       for (const offer of event.offers) {
@@ -439,8 +428,7 @@ export interface TurnSummary {
 
 /** The event types summarizeCompletedTurns treats as "something happened this turn" -- prompts
  * like choice_required/shop_purchase_available/stock_trading_available are deliberately excluded
- * since they describe a pause, not an action taken, and district_values_recalculated is a side
- * effect of shop_purchased rather than a distinct action. */
+ * since they describe a pause, not an action taken. */
 function describeTurnAction(event: GameEvent, board: BoardResponse): string | null {
   switch (event.type) {
     case "dice_rolled":
@@ -529,8 +517,6 @@ export function describeEvent(
       return `${playerLabel(event.playerId)} can buy ${spaceLabel(board, event.spaceId)} for ${event.price} gold.`;
     case "shop_purchased":
       return `${playerLabel(event.playerId)} bought ${spaceLabel(board, event.spaceId)} for ${event.price} gold.`;
-    case "district_values_recalculated":
-      return `Shop values recalculated for a district.`;
     case "stock_trading_available":
       return `${playerLabel(event.playerId)} can trade stock at ${spaceLabel(board, event.spaceId)}.`;
     case "stock_purchased":

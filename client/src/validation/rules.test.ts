@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isBlank,
+  isDecimalStringGreaterThanOne,
   isFractionStrictlyBetweenZeroAndOne,
   isHexColor,
   isNonNegativeIntegerString,
@@ -55,6 +56,22 @@ describe("isPositiveDecimalString", () => {
     expect(isPositiveDecimalString("0.0000")).toBe(false);
     expect(isPositiveDecimalString("-0.1")).toBe(false);
     expect(isPositiveDecimalString("0.10001")).toBe(false);
+  });
+});
+
+describe("isDecimalStringGreaterThanOne", () => {
+  it("accepts any value strictly greater than 1 with at most 4 decimal digits (no upper bound)", () => {
+    expect(isDecimalStringGreaterThanOne("1.1")).toBe(true);
+    expect(isDecimalStringGreaterThanOne("1.0001")).toBe(true);
+    expect(isDecimalStringGreaterThanOne("1000000.1234")).toBe(true);
+  });
+
+  it("rejects 1, values below 1, and more than 4 decimal digits", () => {
+    expect(isDecimalStringGreaterThanOne("1")).toBe(false);
+    expect(isDecimalStringGreaterThanOne("1.0000")).toBe(false);
+    expect(isDecimalStringGreaterThanOne("0.9999")).toBe(false);
+    expect(isDecimalStringGreaterThanOne("-1.5")).toBe(false);
+    expect(isDecimalStringGreaterThanOne("1.10001")).toBe(false);
   });
 });
 

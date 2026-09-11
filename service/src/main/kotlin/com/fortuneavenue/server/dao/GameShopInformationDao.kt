@@ -23,8 +23,10 @@ class GameShopInformationDao {
      * until a player buys in. Called once, when a game actually starts (see
      * GameSimulationService.markReady).
      *
-     * max_cap doesn't have a real formula yet (that's investment mechanics, not implemented) --
-     * it's seeded equal to base_value as an inert placeholder.
+     * max_cap starts at 0 -- an unowned shop has no investable capacity, same as an owned one
+     * that's already at its ceiling. It's given a real value (baseValue times the district's
+     * progression, minus currentValue) the moment a player buys in -- see
+     * GameSimulationService.recalculateMaxCaps.
      */
     fun seedForGame(gameId: Uuid, boardGraph: BoardGraph): List<GameShopInformation> = transaction {
         val spacesById = boardGraph.spaces.associateBy { it.id.value }
@@ -40,7 +42,7 @@ class GameShopInformationDao {
                 districtId = spacesById[shopInfo.spaceId.value]?.districtId
                 currentValue = shopInfo.baseValue
                 currentInvestment = 0
-                maxCap = shopInfo.baseValue
+                maxCap = 0
             }
         }
     }
@@ -115,5 +117,15 @@ class GameShopInformationDao {
 
     fun setCurrentValue(id: Uuid, currentValue: Int): GameShopInformation? = transaction {
         GameShopInformation.findById(id)?.apply { this.currentValue = currentValue }
+    }
+
+    /**
+     * Persists [maxCap] as [id]'s max_cap -- see GameSimulationService.recalculateMaxCaps, which
+     * works out the new ceiling (baseValue times the district's progression for the owner's
+     * current owned_shop_count there) minus currentValue, for every shop that owner holds in a
+     * district right after a purchase changes their dominance level there.
+     */
+    fun setMaxCap(id: Uuid, maxCap: Int): GameShopInformation? = transaction {
+        GameShopInformation.findById(id)?.apply { this.maxCap = maxCap }
     }
 }

@@ -66,10 +66,23 @@ export function isPositiveDecimalString(raw: string): boolean {
 }
 
 /**
- * Converts a decimal string already known to be valid (per isFractionStrictlyBetweenZeroAndOne or
- * isPositiveDecimalString above -- i.e. at most [DECIMAL_SCALE] decimal digits) into the exact
- * fixed-scale string the server requires, e.g. ".05" -> "0.0500". No rounding occurs: the input is
- * already within that precision, so this only ever pads, never truncates.
+ * True if [raw] is a decimal value strictly greater than 1 (no upper bound), with at most
+ * [DECIMAL_SCALE] digits after the decimal point -- for the district progression multipliers
+ * (priceMultiplier/maxCapitalMultiplier), which scale a baseline of 1.0000 and so wouldn't be a
+ * boost at all if they were 1 or less.
+ */
+export function isDecimalStringGreaterThanOne(raw: string): boolean {
+  const parsed = parseDecimal(raw);
+  if (!parsed || parsed.decimalDigits > DECIMAL_SCALE) return false;
+  return parsed.value > 1;
+}
+
+/**
+ * Converts a decimal string already known to be valid (per isFractionStrictlyBetweenZeroAndOne,
+ * isPositiveDecimalString, or isDecimalStringGreaterThanOne above -- i.e. at most [DECIMAL_SCALE]
+ * decimal digits) into the exact fixed-scale string the server requires, e.g. ".05" -> "0.0500".
+ * No rounding occurs: the input is already within that precision, so this only ever pads, never
+ * truncates.
  */
 export function toFixedDecimalString(raw: string, digits: number = DECIMAL_SCALE): string {
   return Number(raw.trim()).toFixed(digits);

@@ -435,12 +435,6 @@ class GameWebSocketHandler(
                     spaceId = spaceId.toString(),
                     price = price,
                 )
-            is GameSimulationService.TurnEvent.DistrictValuesRecalculated ->
-                DistrictValuesRecalculatedEvent(
-                    playerId = playerId.toString(),
-                    districtId = districtId.toString(),
-                    newValuesBySpaceId = newValuesBySpaceId.mapKeys { it.key.toString() },
-                )
             is GameSimulationService.TurnEvent.TollPaid ->
                 TollPaidEvent(
                     playerId = playerId.toString(),

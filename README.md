@@ -62,7 +62,7 @@ curl -s -X POST http://localhost:8080/boards \
         "colorHex": "1E90FF",
         "minimumStockPercentage": 0.5000,
         "progressions": [
-          { "ownedShopCount": 2, "existingShopBoostPercentage": 0.1000, "newShopBoostPercentage": 0.1500 }
+          { "ownedShopCount": 2, "priceMultiplier": 1.1000, "maxCapitalMultiplier": 1.1500 }
         ]
       }
     ]
@@ -86,7 +86,7 @@ curl -s -X POST http://localhost:8080/games/GAME_ID/players \
 
 `userId` on the player call is optional — omit it (or pass `{}`) for an anonymous player. Repeat the user/player steps to add more players; a game needs at least one player, but `markReady` only starts the game once every player in it has readied up.
 
-A district's `progressions` describe how shop values there scale as a single player accumulates more of them: `existingShopBoostPercentage` is applied to shops the player already owns in the district, and `newShopBoostPercentage` (typically larger, to make up for missing out on earlier boosts) is applied to the one they just bought. Any district with 2 or more spaces needs exactly one entry per `ownedShopCount` from 2 up to its total space count; a district with fewer spaces needs none.
+A district's `progressions` describe how a player's dominance there (how many of its shops they own at once) scales two things, looked up fresh by `ownedShopCount` every time rather than compounded: `priceMultiplier` scales the toll every shop they own in the district charges, and `maxCapitalMultiplier` scales how far each of those shops' value can be invested above its `baseValue`. Both must be greater than 1 (a dominant player should charge more and have more room to invest, never less). Any district with 2 or more spaces needs exactly one entry per `ownedShopCount` from 2 up to its total space count; a district with fewer spaces needs none.
 
 A district's `minimumStockPercentage` is the floor, as a fraction of the average value of its SHOP spaces, that its stock can trade at once a game starts -- a positive decimal strictly between 0 and 1 with exactly 4 digits (e.g. `0.5000` means the stock can never trade below half the district's average shop value). When a game starts, this is copied onto a per-game `game_district_information` row along with the computed `currentStockValue` -- the average `currentValue` of the district's shops at that moment, multiplied by `minimumStockPercentage` -- for every district that actually contains at least one SHOP space.
 
@@ -172,11 +172,10 @@ Reply from that same player's socket to buy it or pass:
 {"type":"decline_shop"}
 ```
 
-Buying broadcasts the purchase, then a district recalculation if it brought the buyer's owned count in that district to 2 or more (existing shops get boosted by `existingShopBoostPercentage`, the one just bought by the larger `newShopBoostPercentage`):
+Buying broadcasts the purchase. It never changes any shop's value directly -- a shop's `currentValue` only grows through direct investment (not yet exposed as a player action) -- but if it brought the buyer's owned count in that district to 2 or more, every shop they own there (including the one just bought) gets its investable headroom recalculated using `maxCapitalMultiplier` for that new count, and every toll paid on any of those shops from then on is scaled by `priceMultiplier` for that count, computed fresh at toll time rather than stored:
 
 ```json
 {"type":"shop_purchased","playerId":"...","spaceId":"...","price":300}
-{"type":"district_values_recalculated","playerId":"...","districtId":"...","newValuesBySpaceId":{"...":330,"...":220}}
 ```
 
 Either way, the turn ends right after.

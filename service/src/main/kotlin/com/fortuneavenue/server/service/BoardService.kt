@@ -70,8 +70,8 @@ class BoardService(private val boardDao: BoardDao) {
                                 district.progressions.map {
                                     BoardDao.ProgressionInput(
                                         it.ownedShopCount,
-                                        it.existingShopBoostPercentage,
-                                        it.newShopBoostPercentage,
+                                        it.priceMultiplier,
+                                        it.maxCapitalMultiplier,
                                     )
                                 },
                         )

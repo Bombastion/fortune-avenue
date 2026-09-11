@@ -13,8 +13,8 @@
 const DECIMAL_FIELD_NAMES = [
   "basePricePercentage",
   "minimumStockPercentage",
-  "existingShopBoostPercentage",
-  "newShopBoostPercentage",
+  "priceMultiplier",
+  "maxCapitalMultiplier",
 ] as const;
 
 export function serializeRequestWithDecimals(request: unknown): string {

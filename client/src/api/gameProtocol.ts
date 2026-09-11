@@ -112,14 +112,6 @@ export interface ShopPurchasedEvent {
   price: number;
 }
 
-/** newValuesBySpaceId maps each recalculated shop's spaceId to its new currentValue. */
-export interface DistrictValuesRecalculatedEvent {
-  type: "district_values_recalculated";
-  playerId: string;
-  districtId: string;
-  newValuesBySpaceId: Record<string, number>;
-}
-
 /** One district's stock a player can buy or sell with a buy_stock/sell_stock message. */
 export interface StockTradeOfferPayload {
   districtId: string;
@@ -220,7 +212,6 @@ export type GameEvent =
   | ChoiceRequiredEvent
   | ShopPurchaseAvailableEvent
   | ShopPurchasedEvent
-  | DistrictValuesRecalculatedEvent
   | StockTradingAvailableEvent
   | StockPurchasedEvent
   | StockSoldEvent
@@ -241,7 +232,6 @@ const GAME_EVENT_TYPES: ReadonlySet<GameEvent["type"]> = new Set([
   "choice_required",
   "shop_purchase_available",
   "shop_purchased",
-  "district_values_recalculated",
   "stock_trading_available",
   "stock_purchased",
   "stock_sold",

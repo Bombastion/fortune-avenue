@@ -410,8 +410,8 @@ class GameWebSocketHandlerTest : DatabaseTest() {
                                     listOf(
                                         CreateDistrictProgressionRequest(
                                             ownedShopCount = 2,
-                                            existingShopBoostPercentage = BigDecimal("0.1000"),
-                                            newShopBoostPercentage = BigDecimal("0.2000"),
+                                            priceMultiplier = BigDecimal("1.2000"),
+                                            maxCapitalMultiplier = BigDecimal("1.5000"),
                                         )
                                     ),
                             )
@@ -835,30 +835,37 @@ class GameWebSocketHandlerTest : DatabaseTest() {
         assertThat(secondPurchase["spaceId"].asText()).isEqualTo(secondShopSpaceId)
         assertThat(secondPurchase["price"].asInt()).isEqualTo(200)
 
-        val recalculated = client.nextEvent()
-        assertThat(recalculated["type"].asText()).isEqualTo("district_values_recalculated")
-        assertThat(recalculated["districtId"].asText()).isEqualTo(board.districts.single().id)
-        // existing shop (bought first, base 100) boosted by existingShopBoostPercentage (0.1000) ->
-        // 110
-        assertThat(recalculated["newValuesBySpaceId"][firstShopSpaceId].asInt()).isEqualTo(110)
-        // just-bought shop (base 200) boosted by newShopBoostPercentage (0.2000) -> 240
-        assertThat(recalculated["newValuesBySpaceId"][secondShopSpaceId].asInt()).isEqualTo(240)
-
         assertThat(client.nextEvent()["type"].asText()).isEqualTo("turn_ended")
         assertThat(client.nextEvent()["type"].asText()).isEqualTo("turn_started")
 
+        // A purchase never mutates currentValue anymore -- only investment does, and that's not
+        // wired up yet -- so both shops are still sitting at the price they were bought for.
         assertThat(
                 gameShopInformationDao
                     .findByGameAndSpace(Uuid.parse(game.id), Uuid.parse(firstShopSpaceId))
                     ?.currentValue
             )
-            .isEqualTo(110)
+            .isEqualTo(100)
         assertThat(
                 gameShopInformationDao
                     .findByGameAndSpace(Uuid.parse(game.id), Uuid.parse(secondShopSpaceId))
                     ?.currentValue
             )
-            .isEqualTo(240)
+            .isEqualTo(200)
+        // What does change once the player owns 2 shops in the district is how much room each one
+        // has left to invest: baseValue * maxCapitalMultiplier (1.5000) minus currentValue.
+        assertThat(
+                gameShopInformationDao
+                    .findByGameAndSpace(Uuid.parse(game.id), Uuid.parse(firstShopSpaceId))
+                    ?.maxCap
+            )
+            .isEqualTo(50)
+        assertThat(
+                gameShopInformationDao
+                    .findByGameAndSpace(Uuid.parse(game.id), Uuid.parse(secondShopSpaceId))
+                    ?.maxCap
+            )
+            .isEqualTo(100)
         val playerId = Uuid.parse(player.id)
         assertThat(playerDao.findState(playerId)!!.currentGold)
             .isEqualTo(board.startingGold - 100 - 200)

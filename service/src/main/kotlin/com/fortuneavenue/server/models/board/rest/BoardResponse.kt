@@ -20,8 +20,8 @@ data class BoardPathResponse(
 
 data class DistrictProgressionResponse(
     val ownedShopCount: Int,
-    val existingShopBoostPercentage: BigDecimal,
-    val newShopBoostPercentage: BigDecimal,
+    val priceMultiplier: BigDecimal,
+    val maxCapitalMultiplier: BigDecimal,
 )
 
 data class DistrictResponse(
@@ -90,8 +90,8 @@ fun BoardGraph.toResponse(): BoardResponse {
                             .map {
                                 DistrictProgressionResponse(
                                     it.ownedShopCount,
-                                    it.existingShopBoostPercentage,
-                                    it.newShopBoostPercentage,
+                                    it.priceMultiplier,
+                                    it.maxCapitalMultiplier,
                                 )
                             },
                 )

@@ -79,7 +79,8 @@ class GameShopInformationDaoTest : DatabaseTest() {
         assertThat(inDistrict.basePricePercentage).isEqualByComparingTo(BigDecimal("0.2500"))
         assertThat(inDistrict.currentValue).isEqualTo(100)
         assertThat(inDistrict.currentInvestment).isZero()
-        assertThat(inDistrict.maxCap).isEqualTo(100)
+        // Unowned -- max_cap starts at 0 until a purchase gives it a real ceiling to work from.
+        assertThat(inDistrict.maxCap).isZero()
         assertThat(inDistrict.ownerId).isNull()
         assertThat(inDistrict.districtId).isEqualTo(boardGraph.districts.single().id)
 

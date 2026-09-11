@@ -10,6 +10,6 @@ class DistrictValueProgression(id: EntityID<Uuid>) : UuidEntity(id) {
 
     var districtId by DistrictValueProgressionsTable.districtId
     var ownedShopCount by DistrictValueProgressionsTable.ownedShopCount
-    var existingShopBoostPercentage by DistrictValueProgressionsTable.existingShopBoostPercentage
-    var newShopBoostPercentage by DistrictValueProgressionsTable.newShopBoostPercentage
+    var priceMultiplier by DistrictValueProgressionsTable.priceMultiplier
+    var maxCapitalMultiplier by DistrictValueProgressionsTable.maxCapitalMultiplier
 }

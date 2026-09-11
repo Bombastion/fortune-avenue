@@ -14,9 +14,9 @@ class DistrictProgressionValidatorTest {
 
     private fun progression(
         ownedShopCount: Int,
-        existing: String = "0.1000",
-        new: String = "0.1500",
-    ) = CreateDistrictProgressionRequest(ownedShopCount, BigDecimal(existing), BigDecimal(new))
+        price: String = "1.1000",
+        maxCapital: String = "1.1500",
+    ) = CreateDistrictProgressionRequest(ownedShopCount, BigDecimal(price), BigDecimal(maxCapital))
 
     private fun request(
         spaces: List<CreateBoardSpaceRequest> = listOf(CreateBoardSpaceRequest(SpaceType.BASIC)),
@@ -175,14 +175,14 @@ class DistrictProgressionValidatorTest {
     }
 
     @Test
-    fun `a zero or negative boost percentage, or one with the wrong scale, is rejected`() {
+    fun `a multiplier at or below 1, or one with the wrong scale, is rejected`() {
         val spaces =
             listOf(
                 CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0),
                 CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0),
             )
 
-        val zero =
+        val exactlyOne =
             request(
                 spaces = spaces,
                 districts =
@@ -191,13 +191,13 @@ class DistrictProgressionValidatorTest {
                             "Red",
                             "FF0000",
                             minimumStockPercentage = BigDecimal("0.5000"),
-                            progressions = listOf(progression(2, existing = "0.0000")),
+                            progressions = listOf(progression(2, price = "1.0000")),
                         )
                     ),
             )
-        assertThat(DistrictProgressionValidator.validate(zero)).isNotEmpty()
+        assertThat(DistrictProgressionValidator.validate(exactlyOne)).isNotEmpty()
 
-        val negative =
+        val belowOne =
             request(
                 spaces = spaces,
                 districts =
@@ -206,11 +206,11 @@ class DistrictProgressionValidatorTest {
                             "Red",
                             "FF0000",
                             minimumStockPercentage = BigDecimal("0.5000"),
-                            progressions = listOf(progression(2, new = "-0.1000")),
+                            progressions = listOf(progression(2, maxCapital = "0.9000")),
                         )
                     ),
             )
-        assertThat(DistrictProgressionValidator.validate(negative)).isNotEmpty()
+        assertThat(DistrictProgressionValidator.validate(belowOne)).isNotEmpty()
 
         val wrongScale =
             request(
@@ -221,7 +221,7 @@ class DistrictProgressionValidatorTest {
                             "Red",
                             "FF0000",
                             minimumStockPercentage = BigDecimal("0.5000"),
-                            progressions = listOf(progression(2, existing = "0.1")),
+                            progressions = listOf(progression(2, price = "1.1")),
                         )
                     ),
             )
@@ -229,7 +229,7 @@ class DistrictProgressionValidatorTest {
     }
 
     @Test
-    fun `a boost percentage greater than 1 is accepted -- boosts are multipliers with no upper bound`() {
+    fun `a multiplier well above 1 is accepted -- multipliers have no upper bound`() {
         val spaces =
             listOf(
                 CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0),
@@ -245,7 +245,7 @@ class DistrictProgressionValidatorTest {
                             "FF0000",
                             minimumStockPercentage = BigDecimal("0.5000"),
                             progressions =
-                                listOf(progression(2, existing = "1.5000", new = "2.0000")),
+                                listOf(progression(2, price = "2.5000", maxCapital = "3.0000")),
                         )
                     ),
             )

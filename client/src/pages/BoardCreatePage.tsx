@@ -102,7 +102,7 @@ export function BoardCreatePage() {
   function setProgressionValue(
     districtIndex: number,
     level: number,
-    field: "existingShopBoostPercentage" | "newShopBoostPercentage",
+    field: "priceMultiplier" | "maxCapitalMultiplier",
     value: string,
   ) {
     setForm((f) => ({
@@ -110,8 +110,8 @@ export function BoardCreatePage() {
       districts: f.districts.map((d, i) => {
         if (i !== districtIndex) return d;
         const existing = d.progressionValues[level] ?? {
-          existingShopBoostPercentage: "",
-          newShopBoostPercentage: "",
+          priceMultiplier: "",
+          maxCapitalMultiplier: "",
         };
         return {
           ...d,
@@ -554,7 +554,7 @@ interface DistrictItemProps {
   onRemove: () => void;
   onProgressionChange: (
     level: number,
-    field: "existingShopBoostPercentage" | "newShopBoostPercentage",
+    field: "priceMultiplier" | "maxCapitalMultiplier",
     value: string,
   ) => void;
   nameError?: string;
@@ -580,8 +580,8 @@ function DistrictItem({
   const levels = requiredProgressionLevels(spaceCount);
   const hasProgressionError = levels.some(
     (level) =>
-      fieldErrors[`districts.${index}.progression.${level}.existing`] ||
-      fieldErrors[`districts.${index}.progression.${level}.new`],
+      fieldErrors[`districts.${index}.progression.${level}.price`] ||
+      fieldErrors[`districts.${index}.progression.${level}.maxCapital`],
   );
 
   return (
@@ -643,15 +643,15 @@ function DistrictItem({
             <thead>
               <tr>
                 <th>Owned shop count</th>
-                <th>Existing shop boost %</th>
-                <th>New shop boost %</th>
+                <th>Price multiplier</th>
+                <th>Max capital multiplier</th>
               </tr>
             </thead>
             <tbody>
               {levels.map((level) => {
                 const values = district.progressionValues[level] ?? {
-                  existingShopBoostPercentage: "",
-                  newShopBoostPercentage: "",
+                  priceMultiplier: "",
+                  maxCapitalMultiplier: "",
                 };
                 return (
                   <tr key={level}>
@@ -660,15 +660,15 @@ function DistrictItem({
                       <input
                         type="text"
                         inputMode="decimal"
-                        value={values.existingShopBoostPercentage}
-                        placeholder=".1"
+                        value={values.priceMultiplier}
+                        placeholder="1.1"
                         onChange={(e) =>
-                          onProgressionChange(level, "existingShopBoostPercentage", e.target.value)
+                          onProgressionChange(level, "priceMultiplier", e.target.value)
                         }
                       />
-                      {fieldErrors[`districts.${index}.progression.${level}.existing`] && (
+                      {fieldErrors[`districts.${index}.progression.${level}.price`] && (
                         <span className="field__error" role="alert">
-                          Required, positive, e.g. .1 or 0.1.
+                          Required, greater than 1, e.g. 1.1.
                         </span>
                       )}
                     </td>
@@ -676,15 +676,15 @@ function DistrictItem({
                       <input
                         type="text"
                         inputMode="decimal"
-                        value={values.newShopBoostPercentage}
-                        placeholder=".1"
+                        value={values.maxCapitalMultiplier}
+                        placeholder="1.1"
                         onChange={(e) =>
-                          onProgressionChange(level, "newShopBoostPercentage", e.target.value)
+                          onProgressionChange(level, "maxCapitalMultiplier", e.target.value)
                         }
                       />
-                      {fieldErrors[`districts.${index}.progression.${level}.new`] && (
+                      {fieldErrors[`districts.${index}.progression.${level}.maxCapital`] && (
                         <span className="field__error" role="alert">
-                          Required, positive, e.g. .1 or 0.1.
+                          Required, greater than 1, e.g. 1.1.
                         </span>
                       )}
                     </td>

@@ -2,7 +2,7 @@
 // service/src/main/kotlin/com/fortuneavenue/server/models/**/rest/*.kt).
 //
 // A note on decimal fields (basePricePercentage, minimumStockPercentage,
-// existingShopBoostPercentage, newShopBoostPercentage): the server deserializes these into
+// priceMultiplier, maxCapitalMultiplier): the server deserializes these into
 // java.math.BigDecimal and cares about their exact scale (it requires exactly 4 digits after the
 // decimal point, e.g. "0.5000" not "0.5"). A plain JS `number` can't preserve trailing zeros
 // (JSON.stringify(0.5) is "0.5", not "0.5000"), so on the request side these are typed as
@@ -43,8 +43,8 @@ export interface CreateBoardPathRequest {
 
 export interface CreateDistrictProgressionRequest {
   ownedShopCount: number;
-  existingShopBoostPercentage: string;
-  newShopBoostPercentage: string;
+  priceMultiplier: string;
+  maxCapitalMultiplier: string;
 }
 
 export interface CreateDistrictRequest {
@@ -83,8 +83,8 @@ export interface BoardPathResponse {
 
 export interface DistrictProgressionResponse {
   ownedShopCount: number;
-  existingShopBoostPercentage: number;
-  newShopBoostPercentage: number;
+  priceMultiplier: number;
+  maxCapitalMultiplier: number;
 }
 
 export interface DistrictResponse {

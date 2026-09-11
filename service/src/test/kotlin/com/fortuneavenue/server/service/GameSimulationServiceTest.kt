@@ -20,6 +20,7 @@ import com.fortuneavenue.server.models.board.db.GameShopInformation
 import com.fortuneavenue.server.models.board.db.GameShopInformationTable
 import com.fortuneavenue.server.models.board.db.SpaceType
 import com.fortuneavenue.server.models.game.db.Game
+import com.fortuneavenue.server.models.game.db.GamesTable
 import com.fortuneavenue.server.models.player.db.Player
 import com.fortuneavenue.server.models.player.db.PlayerState
 import com.fortuneavenue.server.models.player.db.PlayerStatus
@@ -145,17 +146,25 @@ class GameSimulationServiceTest {
         return board
     }
 
+    /**
+     * [baseValue] defaults to [currentValue] -- as it always is for a shop nobody's invested in
+     * yet -- so existing tests that only ever set currentValue keep exercising a shop that's still
+     * at its base value, exactly as before.
+     */
     private fun mockShop(
         spaceId: Uuid,
         currentValue: Int,
         ownerId: Uuid? = null,
         districtId: Uuid? = null,
         basePricePercentage: BigDecimal = BigDecimal("0.1000"),
+        baseValue: Int = currentValue,
     ): GameShopInformation {
         val shop = mock(GameShopInformation::class.java)
         lenient().`when`(shop.id).thenReturn(EntityID(Uuid.random(), GameShopInformationTable))
+        lenient().`when`(shop.gameId).thenReturn(EntityID(gameId, GamesTable))
         lenient().`when`(shop.spaceId).thenReturn(EntityID(spaceId, BoardSpacesTable))
         lenient().`when`(shop.currentValue).thenReturn(currentValue)
+        lenient().`when`(shop.baseValue).thenReturn(baseValue)
         lenient().`when`(shop.ownerId).thenReturn(ownerId?.let { EntityID(it, PlayersTable) })
         lenient()
             .`when`(shop.districtId)
@@ -2282,7 +2291,7 @@ class GameSimulationServiceTest {
     }
 
     @Test
-    fun `buyShop recalculates every owned shop in the district once the player's count there reaches 2`() {
+    fun `buyShop recalculates max_cap for every owned shop in the district once the player's count there reaches 2`() {
         val playerId = Uuid.random()
         val spaceId = Uuid.random()
         val otherSpaceId = Uuid.random()
@@ -2299,8 +2308,8 @@ class GameSimulationServiceTest {
                 districtId = districtId,
             )
         val progression = mock(DistrictValueProgression::class.java)
-        lenient().`when`(progression.existingShopBoostPercentage).thenReturn(BigDecimal("0.1000"))
-        lenient().`when`(progression.newShopBoostPercentage).thenReturn(BigDecimal("0.2000"))
+        lenient().`when`(progression.priceMultiplier).thenReturn(BigDecimal("1.2000"))
+        lenient().`when`(progression.maxCapitalMultiplier).thenReturn(BigDecimal("1.5000"))
         val advancedGame = mockGame(turnOrder = listOf(playerId), turnNumber = 1)
         given(gameDao.findById(gameId)).willReturn(game)
         given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
@@ -2316,37 +2325,30 @@ class GameSimulationServiceTest {
             .willReturn(listOf(newShop, existingShop))
         given(boardDao.findDistrictValueProgression(newShop.districtId!!, 2))
             .willReturn(progression)
-        given(gameShopInformationDao.findByGameAndDistrict(gameId, newShop.districtId!!))
-            .willReturn(listOf(newShop, existingShop))
         given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
 
         val result = service.buyShop(gameId, playerId)
 
-        val events = result.getOrNull()
-        val recalculated =
-            events
-                ?.filterIsInstance<GameSimulationService.TurnEvent.DistrictValuesRecalculated>()
-                ?.single()
-        assertThat(recalculated).isNotNull()
-        assertThat(recalculated!!.districtId).isEqualTo(districtId)
-        // newShop just bought: 100 boosted by newShopBoostPercentage (0.2000) -> 120
-        assertThat(recalculated.newValuesBySpaceId[spaceId]).isEqualTo(120)
-        // existingShop already owned: 200 boosted by existingShopBoostPercentage (0.1000) -> 220
-        assertThat(recalculated.newValuesBySpaceId[otherSpaceId]).isEqualTo(220)
-        verify(gameShopInformationDao).setCurrentValue(newShop.id.value, 120)
-        verify(gameShopInformationDao).setCurrentValue(existingShop.id.value, 220)
-        // The district's stock is re-averaged from every shop in it (re-read after the boosts
-        // above), not just the two that were just boosted.
-        verify(gameDistrictInformationDao)
-            .recalculateCurrentStockValue(
-                gameId,
-                newShop.districtId!!,
-                listOf(newShop, existingShop),
+        assertThat(result.getOrNull())
+            .containsExactly(
+                GameSimulationService.TurnEvent.ShopPurchased(playerId, spaceId, 100),
+                GameSimulationService.TurnEvent.TurnEnded(playerId, 0, gameOver = false),
+                GameSimulationService.TurnEvent.TurnStarted(playerId, 1),
             )
+        // newShop: baseValue 100, ceiling 100 * maxCapitalMultiplier (1.5000) = 150, minus its
+        // currentValue (100, unchanged by the purchase) = 50 left to invest.
+        verify(gameShopInformationDao).setMaxCap(newShop.id.value, 50)
+        // existingShop: baseValue 200, ceiling 200 * 1.5000 = 300, minus its currentValue (200,
+        // also unchanged) = 100 left to invest.
+        verify(gameShopInformationDao).setMaxCap(existingShop.id.value, 100)
+        // currentValue is never mutated by a purchase anymore -- only investment can change it --
+        // so there's nothing for the district's stock (derived purely from currentValue) to
+        // recompute.
+        verifyNoInteractions(gameDistrictInformationDao)
     }
 
     @Test
-    fun `buyShop does not recalculate district values when this is still the player's only shop there`() {
+    fun `buyShop leaves max_cap at 0 when this is still the player's only shop there`() {
         val playerId = Uuid.random()
         val spaceId = Uuid.random()
         val districtId = Uuid.random()
@@ -2377,7 +2379,13 @@ class GameSimulationServiceTest {
                 GameSimulationService.TurnEvent.TurnEnded(playerId, 0, gameOver = false),
                 GameSimulationService.TurnEvent.TurnStarted(playerId, 1),
             )
-        // Nothing boosted, so nothing for the district's stock value to be re-averaged from.
+        // Owning just one shop in the district uses the implied 1.0000 baseline multiplier (no
+        // progression row needed), so the ceiling equals baseValue -- exactly currentValue here,
+        // leaving no room to invest yet. boardDao is never asked for a progression row at all.
+        verify(gameShopInformationDao).setMaxCap(shop.id.value, 0)
+        verifyNoInteractions(boardDao)
+        // Nothing changes currentValue anymore, so there's nothing for the district's stock value
+        // to be re-averaged from.
         verifyNoInteractions(gameDistrictInformationDao)
     }
 

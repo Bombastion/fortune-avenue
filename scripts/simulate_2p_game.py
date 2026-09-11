@@ -98,7 +98,7 @@ BOARD_BODY = """{
       "colorHex": "1E90FF",
       "minimumStockPercentage": 0.5000,
       "progressions": [
-        { "ownedShopCount": 2, "existingShopBoostPercentage": 0.1000, "newShopBoostPercentage": 0.1500 }
+        { "ownedShopCount": 2, "priceMultiplier": 1.1000, "maxCapitalMultiplier": 1.1500 }
       ]
     },
     {
@@ -106,7 +106,7 @@ BOARD_BODY = """{
       "colorHex": "DC143C",
       "minimumStockPercentage": 0.5000,
       "progressions": [
-        { "ownedShopCount": 2, "existingShopBoostPercentage": 0.1000, "newShopBoostPercentage": 0.1500 }
+        { "ownedShopCount": 2, "priceMultiplier": 1.1000, "maxCapitalMultiplier": 1.1500 }
       ]
     }
   ]

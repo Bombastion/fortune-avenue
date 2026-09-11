@@ -18,6 +18,7 @@ import java.math.BigDecimal
 import java.math.RoundingMode
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.uuid.Uuid
+import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.springframework.stereotype.Service
 
 /**
@@ -36,8 +37,8 @@ import org.springframework.stereotype.Service
  * [ComputerPlayer.shouldBuyShop]). Either way, a purchase always requires enough gold on hand up
  * front -- [buyShop] fails outright for a human short on gold, and a computer player wanting a shop
  * it can't afford is simply treated the same as it not wanting one. Landing on a SHOP owned by
- * another player instead charges a toll straight to them -- the shop's currentValue times its
- * basePricePercentage (see [payToll]) -- for both a human and a computer player, with no decision
+ * another player instead charges a toll straight to them -- see [tollAmount] for the exact
+ * formula (see [payToll]) -- for both a human and a computer player, with no decision
  * to make either way; landing on a shop the mover already owns themselves is a no-op. Gold can go
  * negative from a toll or a purchase alike, since neither checks the payer's balance first. The
  * turn ends once movement
@@ -194,22 +195,10 @@ class GameSimulationService(
         ) : TurnEvent
 
         /**
-         * Emitted right after a [ShopPurchased] that brought [playerId]'s owned count in
-         * [districtId] to 2 or more -- every shop they own there (including the one just bought)
-         * has been recalculated per that district's progression. [newValuesBySpaceId] maps each
-         * affected shop's spaceId to its new currentValue.
-         */
-        data class DistrictValuesRecalculated(
-            override val playerId: Uuid,
-            val districtId: Uuid,
-            val newValuesBySpaceId: Map<Uuid, Int>,
-        ) : TurnEvent
-
-        /**
          * [playerId] landed on [spaceId], a SHOP owned by [ownerId] (never [playerId] themselves --
-         * see [payToll]), and paid them [amount] gold straight over -- that shop's currentValue
-         * times its basePricePercentage. Emitted the same way for a human or a computer player;
-         * neither is offered a choice about it.
+         * see [payToll]), and paid them [amount] gold straight over -- see [tollAmount] for the
+         * exact formula. Emitted the same way for a human or a computer player; neither is offered
+         * a choice about it.
          */
         data class TollPaid(
             override val playerId: Uuid,
@@ -1012,7 +1001,6 @@ class GameSimulationService(
     ) {
         val netWorthMayHaveMoved = precedingEvents.any {
             it is TurnEvent.ShopPurchased ||
-                it is TurnEvent.DistrictValuesRecalculated ||
                 it is TurnEvent.StockPurchased ||
                 it is TurnEvent.StockSold ||
                 it is TurnEvent.Promoted ||
@@ -1053,13 +1041,12 @@ class GameSimulationService(
 
     /**
      * Pays [shop]'s current price out of [playerId]'s gold and hands them ownership, then -- if
-     * that brought their owned count in [shop]'s district to 2 or more -- recalculates every shop
-     * they own there per that district's progression (see DistrictValueProgressionsTable): every
-     * shop they already owned gets existingShopBoostPercentage, and the one just bought gets
-     * newShopBoostPercentage instead. Shops outside a district, or a purchase that's still the
-     * player's only shop in one, have nothing to recalculate -- and since current_stock_value is
-     * derived purely from shops' currentValue (see GameDistrictInformationDao), a district's stock
-     * only ever needs recomputing in lockstep with that same recalculation.
+     * [shop] is in a district -- recalculates max_cap for every shop [playerId] now owns there
+     * (including the one just bought), since their dominance level in that district just changed
+     * (see [recalculateMaxCaps]). Unlike toll price, a shop's currentValue is never touched by a
+     * purchase -- it only ever grows through direct investment (not yet implemented) -- so there's
+     * nothing here for current_stock_value (derived purely from currentValue, see
+     * GameDistrictInformationDao) to recompute either.
      *
      * Every caller reaches this only after confirming [shop] is unowned (see
      * [pendingShopPurchase]'s own `ownerId == null` filter), and every caller runs under
@@ -1077,64 +1064,89 @@ class GameSimulationService(
         playerDao.adjustGold(playerId, -price)
         gameShopInformationDao.setOwner(shop.id.value, playerId)
 
-        val events =
-            mutableListOf<TurnEvent>(TurnEvent.ShopPurchased(playerId, shop.spaceId.value, price))
-
         val districtId = shop.districtId
         if (districtId != null) {
-            val ownedInDistrict =
-                gameShopInformationDao.findOwnedByPlayerInDistrict(gameId, playerId, districtId)
-            val progression =
-                if (ownedInDistrict.size >= MIN_SHOPS_OWNED_TO_RECALCULATE) {
-                    boardDao.findDistrictValueProgression(districtId, ownedInDistrict.size)
-                } else {
-                    null
-                }
-
-            if (progression != null) {
-                val newValuesBySpaceId = ownedInDistrict.associate { owned ->
-                    val percentage =
-                        if (owned.id.value == shop.id.value) {
-                            progression.newShopBoostPercentage
-                        } else {
-                            progression.existingShopBoostPercentage
-                        }
-                    val newValue = boosted(owned.currentValue, percentage)
-                    gameShopInformationDao.setCurrentValue(owned.id.value, newValue)
-                    owned.spaceId.value to newValue
-                }
-                events +=
-                    TurnEvent.DistrictValuesRecalculated(
-                        playerId,
-                        districtId.value,
-                        newValuesBySpaceId,
-                    )
-
-                // current_stock_value averages every shop in the district, not just the ones
-                // [ownedInDistrict] just boosted -- shops other players (or nobody) own there
-                // still count, so this re-reads the whole district rather than reusing that list.
-                val allShopsInDistrict =
-                    gameShopInformationDao.findByGameAndDistrict(gameId, districtId)
-                gameDistrictInformationDao.recalculateCurrentStockValue(
-                    gameId,
-                    districtId,
-                    allShopsInDistrict,
-                )
-            }
+            recalculateMaxCaps(gameId, playerId, districtId)
         }
 
-        return events
+        return listOf(TurnEvent.ShopPurchased(playerId, shop.spaceId.value, price))
     }
 
     /**
-     * The toll [shop] charges anyone who lands on it besides its owner -- its currentValue
-     * multiplied by its basePricePercentage (see ShopInformationTable), rounded to the nearest gold
-     * the same way [boosted] rounds a district progression.
+     * Recomputes and persists max_cap for every shop [playerId] owns in [districtId] -- called
+     * right after a purchase changes how many of them that is, since max_cap's ceiling depends on
+     * that count (see DistrictValueProgressionsTable.maxCapitalMultiplier). Each shop's ceiling is
+     * its own baseValue times [maxCapitalMultiplierFor] that owned-shop-count, and its new max_cap
+     * is that ceiling minus its currentValue -- floored at 0, the same way an already-maxed-out
+     * shop can never go negative.
      */
-    private fun tollAmount(shop: GameShopInformation): Int =
-        (BigDecimal(shop.currentValue) * shop.basePricePercentage)
-            .setScale(0, RoundingMode.HALF_UP)
-            .toInt()
+    private fun recalculateMaxCaps(gameId: Uuid, playerId: Uuid, districtId: EntityID<Uuid>) {
+        val owned = gameShopInformationDao.findOwnedByPlayerInDistrict(gameId, playerId, districtId)
+        val multiplier = maxCapitalMultiplierFor(districtId, owned.size)
+
+        owned.forEach { shop ->
+            val ceiling =
+                (BigDecimal(shop.baseValue) * multiplier).setScale(0, RoundingMode.HALF_UP).toInt()
+            gameShopInformationDao.setMaxCap(shop.id.value, maxOf(ceiling - shop.currentValue, 0))
+        }
+    }
+
+    /**
+     * How many shops [ownerId] currently owns in [districtId] -- the "dominance level" that
+     * [priceMultiplierFor]/[maxCapitalMultiplierFor] key off of. 0 (the unowned/no-district
+     * baseline) if either is null, without ever querying
+     * [GameShopInformationDao.findOwnedByPlayerInDistrict] for a case that couldn't have a
+     * district row anyway.
+     */
+    private fun ownedShopCountFor(gameId: Uuid, ownerId: Uuid?, districtId: EntityID<Uuid>?): Int {
+        if (ownerId == null || districtId == null) return 0
+        return gameShopInformationDao.findOwnedByPlayerInDistrict(gameId, ownerId, districtId).size
+    }
+
+    /**
+     * The toll price multiplier for a shop whose owner currently owns [ownedShopCount] shops in
+     * [districtId] -- looked up fresh from DistrictValueProgressionsTable every time, never
+     * compounded or cached. 1 (the implied baseline) if there's no district, fewer than 2 owned
+     * shops, or no progression row defined for that exact count.
+     */
+    private fun priceMultiplierFor(districtId: EntityID<Uuid>?, ownedShopCount: Int): BigDecimal {
+        if (districtId == null || ownedShopCount < MIN_SHOPS_OWNED_TO_RECALCULATE) {
+            return BigDecimal.ONE
+        }
+        return boardDao.findDistrictValueProgression(districtId, ownedShopCount)?.priceMultiplier
+            ?: BigDecimal.ONE
+    }
+
+    /** Same idea as [priceMultiplierFor], but for max_cap's ceiling multiplier instead. */
+    private fun maxCapitalMultiplierFor(districtId: EntityID<Uuid>?, ownedShopCount: Int): BigDecimal {
+        if (districtId == null || ownedShopCount < MIN_SHOPS_OWNED_TO_RECALCULATE) {
+            return BigDecimal.ONE
+        }
+        return boardDao.findDistrictValueProgression(districtId, ownedShopCount)
+            ?.maxCapitalMultiplier ?: BigDecimal.ONE
+    }
+
+    /**
+     * The toll [shop] charges anyone who lands on it besides its owner. Weights currentValue
+     * above baseValue twice as heavily as the base amount itself (currentValue*2 - baseValue,
+     * which is just baseValue when currentValue == baseValue, i.e. before any investment), scales
+     * that by basePricePercentage the same way a flat toll always has, and then by
+     * [priceMultiplierFor] for however many shops in [shop]'s district its owner currently owns --
+     * so buying more shops in a district raises toll immediately, without ever touching any shop's
+     * stored currentValue. Rounded to the nearest gold, floored at 1 so a shop whose currentValue
+     * has fallen well below baseValue (not currently possible, but not assumed away either) never
+     * charges a non-positive toll.
+     */
+    private fun tollAmount(shop: GameShopInformation): Int {
+        val ownedShopCount = ownedShopCountFor(shop.gameId.value, shop.ownerId?.value, shop.districtId)
+        val multiplier = priceMultiplierFor(shop.districtId, ownedShopCount)
+        val weightedValue = BigDecimal(shop.currentValue.toLong() * 2 - shop.baseValue)
+        val amount =
+            (weightedValue * shop.basePricePercentage * multiplier)
+                .setScale(0, RoundingMode.HALF_UP)
+                .toInt()
+        return maxOf(amount, 1)
+    }
 
     /**
      * Pays [tollAmount] of [shop] straight from [playerId] to [shop]'s owner -- called only once
@@ -1265,7 +1277,7 @@ class GameSimulationService(
      * district's minimum: current_stock_value recomputed fresh from [info]'s district's current
      * shops via [averageStockValue] (the same formula
      * GameDistrictInformationDao.recalculateCurrentStockValue uses), since shop values -- and so
-     * this floor -- can rise over the course of a game via district value progressions. The
+     * this floor -- can rise over the course of a game as shops are invested in. The
      * decision lives here rather than on GameDistrictInformationDao, which just persists whatever
      * price this settles on (see GameDistrictInformationDao.setCurrentStockValue).
      */
@@ -1356,11 +1368,6 @@ class GameSimulationService(
             MovementResult(precedingEvents + movement.events, movement.updatedGame)
         )
     }
-
-    private fun boosted(value: Int, percentage: BigDecimal): Int =
-        (BigDecimal(value) * (BigDecimal.ONE + percentage))
-            .setScale(0, RoundingMode.HALF_UP)
-            .toInt()
 
     /** Null only if [playerId] somehow has no state at all -- see [PlayerDao.findState]. */
     private fun currentGold(playerId: Uuid): Int? = playerDao.findState(playerId)?.currentGold

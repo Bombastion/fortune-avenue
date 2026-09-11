@@ -142,16 +142,16 @@ export function BoardDetailPage() {
                   <thead>
                     <tr>
                       <th>Owned shop count</th>
-                      <th>Existing shop boost %</th>
-                      <th>New shop boost %</th>
+                      <th>Price multiplier</th>
+                      <th>Max capital multiplier</th>
                     </tr>
                   </thead>
                   <tbody>
                     {district.progressions.map((p) => (
                       <tr key={p.ownedShopCount}>
                         <td>{p.ownedShopCount}</td>
-                        <td>{p.existingShopBoostPercentage}</td>
-                        <td>{p.newShopBoostPercentage}</td>
+                        <td>{p.priceMultiplier}</td>
+                        <td>{p.maxCapitalMultiplier}</td>
                       </tr>
                     ))}
                   </tbody>
