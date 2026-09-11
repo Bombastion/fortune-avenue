@@ -150,6 +150,7 @@ class GameSimulationServiceTest {
         currentValue: Int,
         ownerId: Uuid? = null,
         districtId: Uuid? = null,
+        basePricePercentage: BigDecimal = BigDecimal("0.1000"),
     ): GameShopInformation {
         val shop = mock(GameShopInformation::class.java)
         lenient().`when`(shop.id).thenReturn(EntityID(Uuid.random(), GameShopInformationTable))
@@ -159,6 +160,7 @@ class GameSimulationServiceTest {
         lenient()
             .`when`(shop.districtId)
             .thenReturn(districtId?.let { EntityID(it, DistrictsTable) })
+        lenient().`when`(shop.basePricePercentage).thenReturn(basePricePercentage)
         return shop
     }
 
@@ -2022,7 +2024,7 @@ class GameSimulationServiceTest {
     }
 
     @Test
-    fun `rollDice ends the turn normally when landing on an already-owned shop`() {
+    fun `rollDice pays toll straight to the owner when landing on a shop owned by another player`() {
         val playerId = Uuid.random()
         val ownerId = Uuid.random()
         val spaceId = Uuid.random()
@@ -2037,7 +2039,52 @@ class GameSimulationServiceTest {
                 spaces = emptyList(),
                 paths = listOf(mockPath(spaceId, shopSpaceId, 0)),
             )
-        val shop = mockShop(spaceId = shopSpaceId, currentValue = 250, ownerId = ownerId)
+        val shop =
+            mockShop(
+                spaceId = shopSpaceId,
+                currentValue = 1000,
+                ownerId = ownerId,
+                basePricePercentage = BigDecimal("0.1000"),
+            )
+        val advancedGame = mockGame(turnOrder = listOf(playerId), turnNumber = 1)
+        given(gameDao.findById(gameId)).willReturn(game)
+        given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
+        given(playerDao.findState(playerId)).willReturn(playerState)
+        given(boardDao.findById(boardId)).willReturn(boardGraph)
+        given(dice.roll()).willReturn(1)
+        given(gameShopInformationDao.findByGameAndSpace(gameId, shopSpaceId)).willReturn(shop)
+        given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
+
+        val result = service.rollDice(gameId, playerId)
+
+        assertThat(result.getOrNull())
+            .containsExactly(
+                GameSimulationService.TurnEvent.DiceRolled(playerId, 1),
+                GameSimulationService.TurnEvent.Moved(playerId, 0, spaceId, shopSpaceId, 0),
+                GameSimulationService.TurnEvent.TollPaid(playerId, shopSpaceId, ownerId, 100),
+                GameSimulationService.TurnEvent.TurnEnded(playerId, 0, gameOver = false),
+                GameSimulationService.TurnEvent.TurnStarted(playerId, 1),
+            )
+        verify(playerDao).adjustGold(playerId, -100)
+        verify(playerDao).adjustGold(ownerId, 100)
+    }
+
+    @Test
+    fun `rollDice charges no toll when landing on a shop the player already owns`() {
+        val playerId = Uuid.random()
+        val spaceId = Uuid.random()
+        val shopSpaceId = Uuid.random()
+        val game = mockGame(turnOrder = listOf(playerId))
+        val player = mockPlayer(playerId)
+        val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceId)
+        val board = mockBoard()
+        val boardGraph =
+            BoardGraph(
+                board = board,
+                spaces = emptyList(),
+                paths = listOf(mockPath(spaceId, shopSpaceId, 0)),
+            )
+        val shop = mockShop(spaceId = shopSpaceId, currentValue = 250, ownerId = playerId)
         val advancedGame = mockGame(turnOrder = listOf(playerId), turnNumber = 1)
         given(gameDao.findById(gameId)).willReturn(game)
         given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
@@ -2056,6 +2103,53 @@ class GameSimulationServiceTest {
                 GameSimulationService.TurnEvent.TurnEnded(playerId, 0, gameOver = false),
                 GameSimulationService.TurnEvent.TurnStarted(playerId, 1),
             )
+        verify(playerDao, never()).adjustGold(playerId, -25)
+        verify(playerDao, never()).adjustGold(playerId, 25)
+    }
+
+    @Test
+    fun `rollDice ends the game early when a toll payment pushes the shop owner's net worth to the target`() {
+        val playerId = Uuid.random()
+        val ownerId = Uuid.random()
+        val spaceId = Uuid.random()
+        val shopSpaceId = Uuid.random()
+        val turnOrder = listOf(playerId, ownerId)
+        val game = mockGame(turnOrder = turnOrder, turnNumber = 0, targetNetWorth = 6000)
+        val player = mockPlayer(playerId)
+        val owner = mockPlayer(ownerId)
+        val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceId)
+        val ownerState = mockPlayerState(PlayerStatus.READY, currentGold = 6000)
+        val board = mockBoard()
+        val boardGraph =
+            BoardGraph(
+                board = board,
+                spaces = emptyList(),
+                paths = listOf(mockPath(spaceId, shopSpaceId, 0)),
+            )
+        val shop =
+            mockShop(
+                spaceId = shopSpaceId,
+                currentValue = 1000,
+                ownerId = ownerId,
+                basePricePercentage = BigDecimal("0.1000"),
+            )
+        val advancedGame = mockGame(turnOrder = turnOrder, turnNumber = 1)
+        given(gameDao.findById(gameId)).willReturn(game)
+        given(playerDao.findByGameId(gameId)).willReturn(listOf(player, owner))
+        given(playerDao.findState(playerId)).willReturn(playerState)
+        given(playerDao.findState(ownerId)).willReturn(ownerState)
+        given(boardDao.findById(boardId)).willReturn(boardGraph)
+        given(dice.roll()).willReturn(1)
+        given(gameShopInformationDao.findByGameAndSpace(gameId, shopSpaceId)).willReturn(shop)
+        given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
+
+        service.rollDice(gameId, playerId)
+
+        // The toll itself doesn't reactively change ownerState's mocked currentGold -- it's set to
+        // the target directly, exactly the same shortcut buyShop's own net-worth tests above take
+        // -- the meaningful assertion is that TollPaid is included in what
+        // endGameIfNetWorthReached treats as worth re-checking at all.
+        verify(gameDao).setEndedOnTurn(gameId, 0)
     }
 
     @Test
@@ -2399,6 +2493,56 @@ class GameSimulationServiceTest {
                 GameSimulationService.TurnEvent.TurnStarted(otherPlayerId, 1),
             )
         verify(gameShopInformationDao, never()).setOwner(shop.id.value, computerId)
+    }
+
+    @Test
+    fun `a computer player pays toll immediately, without pausing, when it lands on another player's shop`() {
+        val computerId = Uuid.random()
+        val ownerId = Uuid.random()
+        val spaceId = Uuid.random()
+        val shopSpaceId = Uuid.random()
+        val turnOrder = listOf(computerId, ownerId)
+        val game = mockGame(turnOrder = turnOrder, turnNumber = 0, maxTurns = 10)
+        val computer = mockPlayer(computerId, userId = null)
+        val owner = mockPlayer(ownerId)
+        val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceId)
+        val board = mockBoard()
+        val boardGraph =
+            BoardGraph(
+                board = board,
+                spaces = emptyList(),
+                paths = listOf(mockPath(spaceId, shopSpaceId, 0)),
+            )
+        val shop =
+            mockShop(
+                spaceId = shopSpaceId,
+                currentValue = 1000,
+                ownerId = ownerId,
+                basePricePercentage = BigDecimal("0.1000"),
+            )
+        val advancedGame = mockGame(turnOrder = turnOrder, turnNumber = 1)
+        given(gameDao.findById(gameId)).willReturn(game)
+        given(playerDao.findByGameId(gameId)).willReturn(listOf(computer, owner))
+        given(playerDao.findState(computerId)).willReturn(playerState)
+        given(boardDao.findById(boardId)).willReturn(boardGraph)
+        given(dice.roll()).willReturn(1)
+        given(gameShopInformationDao.findByGameAndSpace(gameId, shopSpaceId)).willReturn(shop)
+        given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
+
+        val result = service.rollDice(gameId, computerId)
+
+        assertThat(result.getOrNull())
+            .containsExactly(
+                GameSimulationService.TurnEvent.DiceRolled(computerId, 1),
+                GameSimulationService.TurnEvent.Moved(computerId, 0, spaceId, shopSpaceId, 0),
+                GameSimulationService.TurnEvent.TollPaid(computerId, shopSpaceId, ownerId, 100),
+                GameSimulationService.TurnEvent.TurnEnded(computerId, 0, gameOver = false),
+                GameSimulationService.TurnEvent.TurnStarted(ownerId, 1),
+            )
+        verify(playerDao).adjustGold(computerId, -100)
+        verify(playerDao).adjustGold(ownerId, 100)
+        verify(gameDao, never()).setMovementPoints(gameId, 0)
+        verifyNoInteractions(computerPlayer)
     }
 
     @Test
