@@ -441,6 +441,13 @@ class GameWebSocketHandler(
                     districtId = districtId.toString(),
                     newValuesBySpaceId = newValuesBySpaceId.mapKeys { it.key.toString() },
                 )
+            is GameSimulationService.TurnEvent.TollPaid ->
+                TollPaidEvent(
+                    playerId = playerId.toString(),
+                    spaceId = spaceId.toString(),
+                    ownerId = ownerId.toString(),
+                    amount = amount,
+                )
             is GameSimulationService.TurnEvent.StockTradingAvailable ->
                 StockTradingAvailableEvent(
                     playerId = playerId.toString(),

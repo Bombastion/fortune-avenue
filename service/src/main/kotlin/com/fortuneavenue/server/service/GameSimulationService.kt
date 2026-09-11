@@ -35,8 +35,12 @@ import org.springframework.stereotype.Service
  * whether it wants to right away, given its actual current gold (again see
  * [ComputerPlayer.shouldBuyShop]). Either way, a purchase always requires enough gold on hand up
  * front -- [buyShop] fails outright for a human short on gold, and a computer player wanting a shop
- * it can't afford is simply treated the same as it not wanting one. Gold can still go negative
- * *after* a purchase, just from other causes not yet implemented. The turn ends once movement
+ * it can't afford is simply treated the same as it not wanting one. Landing on a SHOP owned by
+ * another player instead charges a toll straight to them -- the shop's currentValue times its
+ * basePricePercentage (see [payToll]) -- for both a human and a computer player, with no decision
+ * to make either way; landing on a shop the mover already owns themselves is a no-op. Gold can go
+ * negative from a toll or a purchase alike, since neither checks the payer's balance first. The
+ * turn ends once movement
  * reaches zero, at which point play moves to the next player in turn order. This is announced with
  * a [TurnEvent.TurnStarted] the moment that next player is a human, since nothing else is going to
  * happen until they roll themselves. The game ends once turnNumber reaches maxTurns -- or the
@@ -199,6 +203,19 @@ class GameSimulationService(
             override val playerId: Uuid,
             val districtId: Uuid,
             val newValuesBySpaceId: Map<Uuid, Int>,
+        ) : TurnEvent
+
+        /**
+         * [playerId] landed on [spaceId], a SHOP owned by [ownerId] (never [playerId] themselves --
+         * see [payToll]), and paid them [amount] gold straight over -- that shop's currentValue
+         * times its basePricePercentage. Emitted the same way for a human or a computer player;
+         * neither is offered a choice about it.
+         */
+        data class TollPaid(
+            override val playerId: Uuid,
+            val spaceId: Uuid,
+            val ownerId: Uuid,
+            val amount: Int,
         ) : TurnEvent
 
         /**
@@ -912,30 +929,34 @@ class GameSimulationService(
             }
         }
 
-        val unownedShop =
-            gameShopInformationDao.findByGameAndSpace(gameId, currentSpaceId)?.takeIf {
-                it.ownerId == null
-            }
-        if (unownedShop != null) {
-            if (!isComputer) {
-                gameDao.setMovementPoints(gameId, 0)
-                events +=
-                    TurnEvent.ShopPurchaseAvailable(
-                        playerId,
-                        currentSpaceId,
-                        unownedShop.currentValue,
-                    )
-                return Result.success(MovementResult(events, game))
-            }
+        val shopHere = gameShopInformationDao.findByGameAndSpace(gameId, currentSpaceId)
+        when {
+            shopHere != null && shopHere.ownerId == null -> {
+                if (!isComputer) {
+                    gameDao.setMovementPoints(gameId, 0)
+                    events +=
+                        TurnEvent.ShopPurchaseAvailable(
+                            playerId,
+                            currentSpaceId,
+                            shopHere.currentValue,
+                        )
+                    return Result.success(MovementResult(events, game))
+                }
 
-            // ComputerPlayer decides whether it *wants* the shop, given its real currentGold to
-            // weigh -- but affordability itself is still enforced here, same floor a human's
-            // buyShop gets, regardless of what shouldBuyShop says (see its doc).
-            if (
-                computerPlayer.shouldBuyShop(unownedShop, currentGold(playerId) ?: 0) &&
-                    canAfford(playerId, unownedShop.currentValue)
-            ) {
-                events += purchaseShop(gameId, playerId, unownedShop)
+                // ComputerPlayer decides whether it *wants* the shop, given its real currentGold to
+                // weigh -- but affordability itself is still enforced here, same floor a human's
+                // buyShop gets, regardless of what shouldBuyShop says (see its doc).
+                if (
+                    computerPlayer.shouldBuyShop(shopHere, currentGold(playerId) ?: 0) &&
+                        canAfford(playerId, shopHere.currentValue)
+                ) {
+                    events += purchaseShop(gameId, playerId, shopHere)
+                }
+            }
+            // ownerId is never null here -- the branch above already claimed that case -- but a
+            // safe call still reads better than a non-null assertion this far from the check.
+            shopHere != null && shopHere.ownerId?.value != playerId -> {
+                events += payToll(playerId, shopHere)
             }
         }
 
@@ -975,9 +996,10 @@ class GameSimulationService(
      * GameDao's (see [GameDao.setEndedOnTurn]) -- the moment any of its players' net worth (see
      * [netWorth]) reaches or exceeds [game]'s targetNetWorth. Only bothers checking when
      * [precedingEvents] shows something that could actually have moved a net worth this turn -- a
-     * shop purchase, a district value progression, a stock trade, or a promotion payout (gold on
-     * hand counts now -- see [netWorth]) -- so a turn that's just movement or a suit pickup never
-     * touches PlayerDao/GameShopInformationDao/PlayerStockDao/GameDistrictInformationDao at all.
+     * shop purchase, a district value progression, a stock trade, a promotion payout, or a toll
+     * payment (gold on hand counts now -- see [netWorth]) -- so a turn that's just movement or a
+     * suit pickup never touches
+     * PlayerDao/GameShopInformationDao/PlayerStockDao/GameDistrictInformationDao at all.
      * Checked across every player, not just the one who acted, since a stock trade's price
      * fluctuation (see [fluctuateStockPrice]) can move the value of shares a *different* player
      * holds. A no-op if nobody has crossed it, or if [game] was already ended -- never overwrites
@@ -993,7 +1015,8 @@ class GameSimulationService(
                 it is TurnEvent.DistrictValuesRecalculated ||
                 it is TurnEvent.StockPurchased ||
                 it is TurnEvent.StockSold ||
-                it is TurnEvent.Promoted
+                it is TurnEvent.Promoted ||
+                it is TurnEvent.TollPaid
         }
         if (!netWorthMayHaveMoved) return
         if (game.endedOnTurn != null) return
@@ -1101,6 +1124,35 @@ class GameSimulationService(
         }
 
         return events
+    }
+
+    /**
+     * The toll [shop] charges anyone who lands on it besides its owner -- its currentValue
+     * multiplied by its basePricePercentage (see ShopInformationTable), rounded to the nearest gold
+     * the same way [boosted] rounds a district progression.
+     */
+    private fun tollAmount(shop: GameShopInformation): Int =
+        (BigDecimal(shop.currentValue) * shop.basePricePercentage)
+            .setScale(0, RoundingMode.HALF_UP)
+            .toInt()
+
+    /**
+     * Pays [tollAmount] of [shop] straight from [playerId] to [shop]'s owner -- called only once
+     * [advanceMovement] has confirmed [shop] is both owned and not owned by [playerId] themselves,
+     * so [shop].ownerId is trusted non-null here. Unlike [purchaseShop], there's no affordability
+     * floor: a toll is owed regardless of whether [playerId] can cover it, so this can take their
+     * gold negative, same as a shop purchase already can from other causes.
+     */
+    private fun payToll(playerId: Uuid, shop: GameShopInformation): List<TurnEvent> {
+        val ownerId =
+            checkNotNull(shop.ownerId) { "Shop ${shop.id.value} has no owner to pay toll to." }
+                .value
+        val amount = tollAmount(shop)
+
+        playerDao.adjustGold(playerId, -amount)
+        playerDao.adjustGold(ownerId, amount)
+
+        return listOf(TurnEvent.TollPaid(playerId, shop.spaceId.value, ownerId, amount))
     }
 
     /**

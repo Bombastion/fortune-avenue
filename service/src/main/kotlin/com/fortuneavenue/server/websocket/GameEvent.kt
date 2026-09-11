@@ -94,6 +94,17 @@ data class DistrictValuesRecalculatedEvent(
 ) : GameEvent
 
 /**
+ * [playerId] landed on [spaceId], a SHOP owned by [ownerId], and paid them [amount] gold in toll.
+ */
+data class TollPaidEvent(
+    val playerId: String,
+    val spaceId: String,
+    val ownerId: String,
+    val amount: Int,
+    override val type: String = "toll_paid",
+) : GameEvent
+
+/**
  * One district's stock a player can buy or sell with a `buy_stock`/`sell_stock` message, naming its
  * `districtId`.
  */
