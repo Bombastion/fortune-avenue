@@ -181,13 +181,13 @@ class BoardDaoTest : DatabaseTest() {
                         listOf(
                             BoardDao.ProgressionInput(
                                 2,
-                                BigDecimal("0.1000"),
-                                BigDecimal("0.1500"),
+                                BigDecimal("1.1000"),
+                                BigDecimal("1.1500"),
                             ),
                             BoardDao.ProgressionInput(
                                 3,
-                                BigDecimal("0.0500"),
-                                BigDecimal("0.1000"),
+                                BigDecimal("1.0500"),
+                                BigDecimal("1.1000"),
                             ),
                         ),
                 )
@@ -238,7 +238,7 @@ class BoardDaoTest : DatabaseTest() {
                     minimumStockPercentage = BigDecimal("0.5000"),
                     progressionInputs =
                         listOf(
-                            BoardDao.ProgressionInput(2, BigDecimal("0.1000"), BigDecimal("0.1500"))
+                            BoardDao.ProgressionInput(2, BigDecimal("1.1000"), BigDecimal("1.1500"))
                         ),
                 )
             )
@@ -258,8 +258,8 @@ class BoardDaoTest : DatabaseTest() {
 
         val found = boardDao.findDistrictValueProgression(districtId, 2)
         assertThat(found).isNotNull()
-        assertThat(found!!.existingShopBoostPercentage).isEqualByComparingTo(BigDecimal("0.1000"))
-        assertThat(found.newShopBoostPercentage).isEqualByComparingTo(BigDecimal("0.1500"))
+        assertThat(found!!.priceMultiplier).isEqualByComparingTo(BigDecimal("1.1000"))
+        assertThat(found.maxCapitalMultiplier).isEqualByComparingTo(BigDecimal("1.1500"))
 
         assertThat(boardDao.findDistrictValueProgression(districtId, 3)).isNull()
     }

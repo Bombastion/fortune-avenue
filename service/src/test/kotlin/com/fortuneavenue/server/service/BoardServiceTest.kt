@@ -278,7 +278,7 @@ class BoardServiceTest {
     @Test
     fun `a board with complete district progressions is validated then persisted via the DAO`() {
         val progression =
-            CreateDistrictProgressionRequest(2, BigDecimal("0.1000"), BigDecimal("0.1500"))
+            CreateDistrictProgressionRequest(2, BigDecimal("1.1000"), BigDecimal("1.1500"))
         val request =
             validRequest().let { req ->
                 req.copy(
@@ -318,7 +318,7 @@ class BoardServiceTest {
                     minimumStockPercentage = BigDecimal("0.5000"),
                     progressionInputs =
                         listOf(
-                            BoardDao.ProgressionInput(2, BigDecimal("0.1000"), BigDecimal("0.1500"))
+                            BoardDao.ProgressionInput(2, BigDecimal("1.1000"), BigDecimal("1.1500"))
                         ),
                 )
             )

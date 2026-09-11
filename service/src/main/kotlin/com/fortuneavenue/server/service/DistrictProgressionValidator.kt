@@ -4,7 +4,7 @@ import com.fortuneavenue.server.models.board.rest.CreateBoardRequest
 import com.fortuneavenue.server.models.board.rest.CreateDistrictProgressionRequest
 import java.math.BigDecimal
 
-private const val BOOST_PERCENTAGE_SCALE = 4
+private const val MULTIPLIER_SCALE = 4
 private const val MIN_SPACES_REQUIRING_PROGRESSIONS = 2
 
 /**
@@ -12,8 +12,9 @@ private const val MIN_SPACES_REQUIRING_PROGRESSIONS = 2
  * [MIN_SPACES_REQUIRING_PROGRESSIONS] spaces (per spaces' districtIndex) must define exactly one
  * progression entry for every ownedShopCount from 2 up to that district's total space count -- no
  * gaps, no duplicates, no extras -- and a district with fewer spaces must define none. Every
- * entry's existingShopBoostPercentage/newShopBoostPercentage must be a positive decimal with
- * exactly 4 digits.
+ * entry's priceMultiplier/maxCapitalMultiplier must be a decimal greater than 1 with exactly 4
+ * digits -- both are multipliers applied on top of the implied 1.0000 baseline for owning just one
+ * shop, so anything at or below 1 wouldn't be a boost at all.
  */
 object DistrictProgressionValidator {
 
@@ -32,7 +33,7 @@ object DistrictProgressionValidator {
             val actualLevels = district.progressions.map { it.ownedShopCount }
 
             levelErrors(index, spaceCount, requiredLevels, actualLevels) +
-                district.progressions.flatMap { percentageErrors(index, it) }
+                district.progressions.flatMap { multiplierErrors(index, it) }
         }
     }
 
@@ -65,26 +66,26 @@ object DistrictProgressionValidator {
         return errors
     }
 
-    private fun percentageErrors(
+    private fun multiplierErrors(
         index: Int,
         progression: CreateDistrictProgressionRequest,
     ): List<String> {
         val errors = mutableListOf<String>()
 
-        if (!isValidBoostPercentage(progression.existingShopBoostPercentage)) {
+        if (!isValidMultiplier(progression.priceMultiplier)) {
             errors +=
-                "District at index $index's progression for ownedShopCount ${progression.ownedShopCount} must have a positive " +
-                    "existingShopBoostPercentage with exactly $BOOST_PERCENTAGE_SCALE digits."
+                "District at index $index's progression for ownedShopCount ${progression.ownedShopCount} must have a " +
+                    "priceMultiplier greater than 1 with exactly $MULTIPLIER_SCALE digits."
         }
-        if (!isValidBoostPercentage(progression.newShopBoostPercentage)) {
+        if (!isValidMultiplier(progression.maxCapitalMultiplier)) {
             errors +=
-                "District at index $index's progression for ownedShopCount ${progression.ownedShopCount} must have a positive " +
-                    "newShopBoostPercentage with exactly $BOOST_PERCENTAGE_SCALE digits."
+                "District at index $index's progression for ownedShopCount ${progression.ownedShopCount} must have a " +
+                    "maxCapitalMultiplier greater than 1 with exactly $MULTIPLIER_SCALE digits."
         }
 
         return errors
     }
 
-    private fun isValidBoostPercentage(value: BigDecimal): Boolean =
-        value > BigDecimal.ZERO && value.scale() == BOOST_PERCENTAGE_SCALE
+    private fun isValidMultiplier(value: BigDecimal): Boolean =
+        value > BigDecimal.ONE && value.scale() == MULTIPLIER_SCALE
 }

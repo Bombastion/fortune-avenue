@@ -32,14 +32,18 @@ data class CreateBoardPathRequest(
 )
 
 /**
- * [ownedShopCount] is the count of shops a player has just reached in the district (2, 3, 4, ... --
- * never 1, since a single shop has nothing to boost off of yet). [existingShopBoostPercentage] and
- * [newShopBoostPercentage] must each be a positive decimal with exactly 4 digits
+ * [ownedShopCount] is the count of shops a player currently owns in the district (2, 3, 4, ... --
+ * never 1, since owning just one has nothing to boost off of yet; that level uses an implied
+ * baseline multiplier of 1.0000 instead). [priceMultiplier] scales a shop's dynamically-computed
+ * toll price at this level (see GameSimulationService.tollAmount); [maxCapitalMultiplier] scales
+ * its baseValue to produce the ceiling on how much capital it can hold (see
+ * GameSimulationService.recalculateMaxCaps). Both must be a decimal greater than 1 with exactly 4
+ * digits -- multipliers, not additive percentages, with no fixed upper bound.
  */
 data class CreateDistrictProgressionRequest(
     val ownedShopCount: Int,
-    val existingShopBoostPercentage: BigDecimal,
-    val newShopBoostPercentage: BigDecimal,
+    val priceMultiplier: BigDecimal,
+    val maxCapitalMultiplier: BigDecimal,
 )
 
 /**
@@ -51,10 +55,11 @@ data class CreateDistrictProgressionRequest(
  * district's average shop value). Copied onto game_district_information when a game starts (see
  * [com.fortuneavenue.server.dao.GameDistrictInformationDao.seedForGame]). See [DistrictValidator].
  *
- * [progressions] defines how shop values in this district scale as a player accumulates more of
- * them: a district with at least 2 spaces (see [CreateBoardRequest.spaces]'s districtIndex) must
- * define exactly one entry for every ownedShopCount from 2 up to that district's total space count;
- * a district with fewer than 2 spaces must define none. See [DistrictProgressionValidator].
+ * [progressions] defines how a shop's toll price and investable capacity scale as a player
+ * accumulates more shops in this district: a district with at least 2 spaces (see
+ * [CreateBoardRequest.spaces]'s districtIndex) must define exactly one entry for every
+ * ownedShopCount from 2 up to that district's total space count; a district with fewer than 2
+ * spaces must define none. See [DistrictProgressionValidator].
  */
 data class CreateDistrictRequest(
     val name: String,

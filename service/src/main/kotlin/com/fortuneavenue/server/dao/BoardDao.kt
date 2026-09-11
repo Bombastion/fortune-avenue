@@ -51,8 +51,8 @@ class BoardDao {
 
     data class ProgressionInput(
         val ownedShopCount: Int,
-        val existingShopBoostPercentage: BigDecimal,
-        val newShopBoostPercentage: BigDecimal,
+        val priceMultiplier: BigDecimal,
+        val maxCapitalMultiplier: BigDecimal,
     )
 
     data class DistrictInput(
@@ -108,8 +108,8 @@ class BoardDao {
                     DistrictValueProgression.new {
                         districtId = district.id
                         ownedShopCount = progressionInput.ownedShopCount
-                        existingShopBoostPercentage = progressionInput.existingShopBoostPercentage
-                        newShopBoostPercentage = progressionInput.newShopBoostPercentage
+                        priceMultiplier = progressionInput.priceMultiplier
+                        maxCapitalMultiplier = progressionInput.maxCapitalMultiplier
                     }
                 }
             }
