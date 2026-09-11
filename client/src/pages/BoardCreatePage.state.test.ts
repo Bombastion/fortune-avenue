@@ -129,15 +129,15 @@ describe("buildCreateBoardRequest", () => {
           colorHex: "1e90ff",
           minimumStockPercentage: ".5",
           progressionValues: {
-            2: { existingShopBoostPercentage: " .1 ", newShopBoostPercentage: "0.2" },
+            2: { priceMultiplier: " 1.1 ", maxCapitalMultiplier: "1.2" },
           },
         },
       ],
     };
 
-    // basePricePercentage, minimumStockPercentage, and the boost percentages were all typed in
-    // shorthand (".05", ".5", ".1", "0.2") -- buildCreateBoardRequest is where that gets padded
-    // out to the exact 4-decimal-digit strings the server's BigDecimal fields require.
+    // basePricePercentage, minimumStockPercentage, and the progression multipliers were all
+    // typed in shorthand (".05", ".5", "1.1", "1.2") -- buildCreateBoardRequest is where that gets
+    // padded out to the exact 4-decimal-digit strings the server's BigDecimal fields require.
     expect(buildCreateBoardRequest(form)).toEqual({
       name: "My Board",
       spaces: [
@@ -159,7 +159,7 @@ describe("buildCreateBoardRequest", () => {
           colorHex: "1E90FF",
           minimumStockPercentage: "0.5000",
           progressions: [
-            { ownedShopCount: 2, existingShopBoostPercentage: "0.1000", newShopBoostPercentage: "0.2000" },
+            { ownedShopCount: 2, priceMultiplier: "1.1000", maxCapitalMultiplier: "1.2000" },
           ],
         },
       ],

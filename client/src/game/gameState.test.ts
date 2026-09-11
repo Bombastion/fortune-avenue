@@ -128,17 +128,12 @@ describe("applyGameEvent", () => {
         pricePerShare: 20,
         totalCost: 200,
       },
-      {
-        type: "district_values_recalculated",
-        playerId: "p1",
-        districtId: "district-1",
-        newValuesBySpaceId: { "space-1": 300 },
-      },
     ]);
 
     // Started with 1500 gold, spent 250 on the shop and 200 on stock -> 1050 left.
-    // Shop now worth 300 (recalculated), plus 10 shares * 20/share = 200 in stock.
-    expect(netWorth(state, "p1")).toBe(1050 + 300 + 200);
+    // Shop worth 250 (what it was bought for -- nothing recalculates that after the fact
+    // anymore), plus 10 shares * 20/share = 200 in stock.
+    expect(netWorth(state, "p1")).toBe(1050 + 250 + 200);
   });
 
   it("clears a pending prompt once it's resolved, but leaves it pending across an error", () => {

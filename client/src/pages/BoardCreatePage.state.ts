@@ -14,10 +14,10 @@ import { validateBoardGraph } from "../validation/boardGraph";
 import {
   DECIMAL_SCALE,
   isBlank,
+  isDecimalStringGreaterThanOne,
   isFractionStrictlyBetweenZeroAndOne,
   isHexColor,
   isNonNegativeIntegerString,
-  isPositiveDecimalString,
   isPositiveIntegerString,
   toFixedDecimalString,
 } from "../validation/rules";
@@ -51,7 +51,7 @@ export interface DistrictFormState {
    * requiredProgressionLevels below) -- entries for levels no longer required are kept around
    * (not deleted) so the values aren't lost if the user temporarily reassigns a space away and
    * back. */
-  progressionValues: Record<number, { existingShopBoostPercentage: string; newShopBoostPercentage: string }>;
+  progressionValues: Record<number, { priceMultiplier: string; maxCapitalMultiplier: string }>;
 }
 
 export interface BoardFormState {
@@ -281,18 +281,18 @@ export function validateBoardForm(form: BoardFormState): BoardValidationResult {
     const levels = requiredProgressionLevels(spaceCount);
     for (const level of levels) {
       const values = district.progressionValues[level];
-      if (!values || !isPositiveDecimalString(values.existingShopBoostPercentage)) {
+      if (!values || !isDecimalStringGreaterThanOne(values.priceMultiplier)) {
         addError(
           result,
-          `districts.${index}.progression.${level}.existing`,
-          `District #${index}, ownedShopCount ${level}: existingShopBoostPercentage must be a positive value with at most ${DECIMAL_SCALE} decimal digits.`,
+          `districts.${index}.progression.${level}.price`,
+          `District #${index}, ownedShopCount ${level}: priceMultiplier must be greater than 1, with at most ${DECIMAL_SCALE} decimal digits.`,
         );
       }
-      if (!values || !isPositiveDecimalString(values.newShopBoostPercentage)) {
+      if (!values || !isDecimalStringGreaterThanOne(values.maxCapitalMultiplier)) {
         addError(
           result,
-          `districts.${index}.progression.${level}.new`,
-          `District #${index}, ownedShopCount ${level}: newShopBoostPercentage must be a positive value with at most ${DECIMAL_SCALE} decimal digits.`,
+          `districts.${index}.progression.${level}.maxCapital`,
+          `District #${index}, ownedShopCount ${level}: maxCapitalMultiplier must be greater than 1, with at most ${DECIMAL_SCALE} decimal digits.`,
         );
       }
     }
@@ -344,8 +344,8 @@ export function buildCreateBoardRequest(form: BoardFormState): CreateBoardReques
       const values = district.progressionValues[level];
       return {
         ownedShopCount: level,
-        existingShopBoostPercentage: toFixedDecimalString(values.existingShopBoostPercentage),
-        newShopBoostPercentage: toFixedDecimalString(values.newShopBoostPercentage),
+        priceMultiplier: toFixedDecimalString(values.priceMultiplier),
+        maxCapitalMultiplier: toFixedDecimalString(values.maxCapitalMultiplier),
       };
     });
 
