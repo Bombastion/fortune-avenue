@@ -60,7 +60,6 @@ curl -s -X POST http://localhost:8080/boards \
       {
         "name": "Blue District",
         "colorHex": "1E90FF",
-        "minimumStockPercentage": 0.5000,
         "progressions": [
           { "ownedShopCount": 2, "priceMultiplier": 1.1000, "maxCapitalMultiplier": 1.1500 }
         ]
@@ -88,7 +87,7 @@ curl -s -X POST http://localhost:8080/games/GAME_ID/players \
 
 A district's `progressions` describe how a player's dominance there (how many of its shops they own at once) scales two things, looked up fresh by `ownedShopCount` every time rather than compounded: `priceMultiplier` scales the toll every shop they own in the district charges, and `maxCapitalMultiplier` scales how far each of those shops' value can be invested above its `baseValue`. Both must be greater than 1 (a dominant player should charge more and have more room to invest, never less). Any district with 2 or more spaces needs exactly one entry per `ownedShopCount` from 2 up to its total space count; a district with fewer spaces needs none.
 
-A district's `minimumStockPercentage` is the floor, as a fraction of the average value of its SHOP spaces, that its stock can trade at once a game starts -- a positive decimal strictly between 0 and 1 with exactly 4 digits (e.g. `0.5000` means the stock can never trade below half the district's average shop value). When a game starts, this is copied onto a per-game `game_district_information` row along with the computed `currentStockValue` -- the average `currentValue` of the district's shops at that moment, multiplied by `minimumStockPercentage` -- for every district that actually contains at least one SHOP space.
+A district's stock price (`currentStockValue`) is computed the same way the real game does it, per FortuneStreetModding's own board editor and district simulator tools: the average `currentValue` of the district's SHOP spaces, floored to an integer, then multiplied by a fixed 16.16 fixed-point constant (`0x0B00 / 0x10000`, roughly 4.3%) and floored again. This isn't configurable per board -- it's the same constant for every district in every game. When a game starts, the result is seeded onto a per-game `game_district_information` row for every district that actually contains at least one SHOP space.
 
 A board's `startingGold` is how much gold every player in a game on that board starts with -- it's copied onto each player's state the moment they're added to a game (see `POST /games/{gameId}/players` below).
 
@@ -172,13 +171,32 @@ Reply from that same player's socket to buy it or pass:
 {"type":"decline_shop"}
 ```
 
-Buying broadcasts the purchase. It never changes any shop's value directly -- a shop's `currentValue` only grows through direct investment (not yet exposed as a player action) -- but if it brought the buyer's owned count in that district to 2 or more, every shop they own there (including the one just bought) gets its investable headroom recalculated using `maxCapitalMultiplier` for that new count, and every toll paid on any of those shops from then on is scaled by `priceMultiplier` for that count, computed fresh at toll time rather than stored:
+Buying broadcasts the purchase. It never changes any shop's value directly -- but if it brought the buyer's owned count in that district to 2 or more, every shop they own there (including the one just bought) gets its investable headroom recalculated using `maxCapitalMultiplier` for that new count, and every toll paid on any of those shops from then on is scaled by `priceMultiplier` for that count, computed fresh at toll time rather than stored:
 
 ```json
 {"type":"shop_purchased","playerId":"...","spaceId":"...","price":300}
 ```
 
-Either way, the turn ends right after.
+If movement instead runs out on a SHOP the player already owns themselves, and that shop still has investable headroom left (its `maxCapitalMultiplier`-derived ceiling not yet reached), it pauses there too and offers the investment:
+
+```json
+{"type":"investment_available","playerId":"...","spaceId":"...","currentValue":400,"maxCap":50}
+```
+
+Reply from that same player's socket to invest some of their own gold into it or pass:
+
+```json
+{"type":"invest","amount":30}
+{"type":"decline_invest"}
+```
+
+`amount` must be between 1 and 999, and can't exceed either the shop's own remaining headroom (`maxCap` above) or the player's own gold; `invest` comes back as an `error` instead if it does, leaving the decision still pending. Investing broadcasts the result and ends the turn, exactly like buying a shop does:
+
+```json
+{"type":"invested","playerId":"...","spaceId":"...","amount":30,"newCurrentValue":430,"newMaxCap":20}
+```
+
+Landing on a shop you own with no headroom left doesn't pause at all -- exactly as landing on one you own has always worked. Either way -- bought, invested, or declined -- the turn ends right after.
 
 Once movement is exhausted (or a shop decision is made), all sockets see the turn end, and — once the game hits its max turn count — an additional game-over event:
 

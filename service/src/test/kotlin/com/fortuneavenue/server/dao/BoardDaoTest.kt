@@ -176,7 +176,6 @@ class BoardDaoTest : DatabaseTest() {
                 BoardDao.DistrictInput(
                     name = "Red",
                     colorHex = "FF0000",
-                    minimumStockPercentage = BigDecimal("0.5000"),
                     progressionInputs =
                         listOf(
                             BoardDao.ProgressionInput(
@@ -235,7 +234,6 @@ class BoardDaoTest : DatabaseTest() {
                 BoardDao.DistrictInput(
                     name = "Red",
                     colorHex = "FF0000",
-                    minimumStockPercentage = BigDecimal("0.5000"),
                     progressionInputs =
                         listOf(
                             BoardDao.ProgressionInput(2, BigDecimal("1.1000"), BigDecimal("1.1500"))

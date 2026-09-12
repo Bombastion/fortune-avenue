@@ -25,11 +25,11 @@ class GameDistrictInformationDaoTest : DatabaseTest() {
      * A board with two districts -- "Red" has two SHOP spaces (base values 100 and 200) plus a
      * third SHOP space outside any district, "Blue" has only a BASIC space and no shops at all.
      */
-    private fun createBoardWithShops(redStockPercentage: String = "0.5000"): BoardGraph {
+    private fun createBoardWithShops(): BoardGraph {
         val districts =
             listOf(
-                BoardDao.DistrictInput("Red", "FF0000", BigDecimal(redStockPercentage)),
-                BoardDao.DistrictInput("Blue", "0000FF", BigDecimal("0.5000")),
+                BoardDao.DistrictInput("Red", "FF0000"),
+                BoardDao.DistrictInput("Blue", "0000FF"),
             )
         val spaces =
             listOf(
@@ -86,25 +86,25 @@ class GameDistrictInformationDaoTest : DatabaseTest() {
         assertThat(redInfo.gameId.value).isEqualTo(gameId)
         assertThat(redInfo.districtId).isEqualTo(redDistrict.id)
         assertThat(redInfo.boardId).isEqualTo(boardGraph.board.id)
-        assertThat(redInfo.minimumStockPercentage).isEqualByComparingTo(BigDecimal("0.5000"))
-        // average(100, 200) = 150; 150 * 0.5 = 75.
-        assertThat(redInfo.currentStockValue).isEqualTo(75)
+        // average(100, 200) = floor(300 / 2) = 150; floor(150 * 0x0B00 / 0x10000) =
+        // floor(150 * 2816 / 65536) = floor(422400 / 65536) = floor(6.4453...) = 6.
+        assertThat(redInfo.currentStockValue).isEqualTo(6)
     }
 
     @Test
-    fun `seedForGame rounds current stock value to the nearest whole gold`() {
-        val districts = listOf(BoardDao.DistrictInput("Red", "FF0000", BigDecimal("0.2500")))
+    fun `seedForGame floors current stock value at each step instead of rounding`() {
+        val districts = listOf(BoardDao.DistrictInput("Red", "FF0000"))
         val spaces =
             listOf(
                 BoardDao.SpaceInput(
                     SpaceType.SHOP,
-                    baseValue = 1,
+                    baseValue = 1000,
                     basePricePercentage = BigDecimal("0.2500"),
                     districtIndex = 0,
                 ),
                 BoardDao.SpaceInput(
                     SpaceType.SHOP,
-                    baseValue = 3,
+                    baseValue = 1001,
                     basePricePercentage = BigDecimal("0.2500"),
                     districtIndex = 0,
                 ),
@@ -112,7 +112,7 @@ class GameDistrictInformationDaoTest : DatabaseTest() {
         val paths = listOf(BoardDao.PathInput(0, 1, 0), BoardDao.PathInput(1, 0, 0))
         val boardGraph =
             boardDao.create(
-                name = "rounding-board-${Uuid.random()}",
+                name = "flooring-board-${Uuid.random()}",
                 spaceInputs = spaces,
                 pathInputs = paths,
                 startIndex = 0,
@@ -123,8 +123,10 @@ class GameDistrictInformationDaoTest : DatabaseTest() {
 
         val seeded = gameDistrictInformationDao.seedForGame(gameId, boardGraph, seededShops)
 
-        // average(1, 3) = 2; 2 * 0.2500 = 0.5, which rounds up to 1 under HALF_UP.
-        assertThat(seeded.single().currentStockValue).isEqualTo(1)
+        // average(1000, 1001) = floor(2001 / 2) = 1000 (not rounded up to 1001); then
+        // floor(1000 * 0x0B00 / 0x10000) = floor(1000 * 2816 / 65536) = floor(2816000 / 65536) =
+        // floor(42.9688...) = 42 (not rounded up to 43).
+        assertThat(seeded.single().currentStockValue).isEqualTo(42)
     }
 
     @Test
@@ -136,7 +138,7 @@ class GameDistrictInformationDaoTest : DatabaseTest() {
         val redInfo = seeded.single()
 
         assertThat(gameDistrictInformationDao.findById(redInfo.id.value)?.currentStockValue)
-            .isEqualTo(75)
+            .isEqualTo(6)
         assertThat(gameDistrictInformationDao.findById(Uuid.random())).isNull()
     }
 
@@ -155,7 +157,7 @@ class GameDistrictInformationDaoTest : DatabaseTest() {
                     .findByGameAndDistrict(gameId, redDistrictId)
                     ?.currentStockValue
             )
-            .isEqualTo(75)
+            .isEqualTo(6)
         assertThat(gameDistrictInformationDao.findByGameAndDistrict(gameId, blueDistrictId))
             .isNull()
     }
@@ -181,14 +183,15 @@ class GameDistrictInformationDaoTest : DatabaseTest() {
                 refreshedShops,
             )
 
-        // average(150, 200) = 175; 175 * 0.5 = 87.5, which rounds up to 88 under HALF_UP.
-        assertThat(updated?.currentStockValue).isEqualTo(88)
+        // average(150, 200) = floor(350 / 2) = 175; floor(175 * 0x0B00 / 0x10000) =
+        // floor(175 * 2816 / 65536) = floor(492800 / 65536) = floor(7.5195...) = 7.
+        assertThat(updated?.currentStockValue).isEqualTo(7)
         assertThat(
                 gameDistrictInformationDao
                     .findByGameAndDistrict(gameId, redDistrict.id.value)
                     ?.currentStockValue
             )
-            .isEqualTo(88)
+            .isEqualTo(7)
     }
 
     @Test
@@ -232,7 +235,7 @@ class GameDistrictInformationDaoTest : DatabaseTest() {
                     .findByGameAndDistrict(gameId, redDistrict.id.value)
                     ?.currentStockValue
             )
-            .isEqualTo(75)
+            .isEqualTo(6)
     }
 
     @Test

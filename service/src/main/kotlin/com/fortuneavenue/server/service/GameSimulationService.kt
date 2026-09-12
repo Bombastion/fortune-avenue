@@ -49,6 +49,17 @@ import org.springframework.stereotype.Service
  * every stock they hold -- see [netWorth]) reaches or exceeds the game's targetNetWorth, whichever
  * happens first (see [endGameIfNetWorthReached]).
  *
+ * If movement instead ends exactly on a SHOP the mover already owns themselves, and that shop
+ * still has investable headroom left (max_cap > 0), a human player is offered the chance to put
+ * their own gold into it (see [invest]/[declineInvest]) before the turn actually ends -- capped
+ * per call at [MAX_INVESTMENT_PER_ACTION], and overall by however much of that headroom is left
+ * (see [recalculateMaxCaps]) and by how much gold they actually have. A computer player never
+ * invests -- no policy exists for it yet, same gap as stock trading (see [ComputerPlayer]) -- and
+ * landing on an already-fully-invested shop of your own (max_cap already 0) is a no-op for anyone,
+ * exactly like landing on it always was before investing existed. Merely passing through a shop
+ * partway through a longer move, rather than ending movement there, never offers this either --
+ * same as an unowned shop's purchase offer above.
+ *
  * Every space a player is moved onto along the way, whether just passed through mid-move or where
  * they end up, is also checked for a suit (HEART/DIAMOND/SPADE/CLUB, see SpaceType): landing on or
  * passing one picks it up for that player (see PlayerDao.addHeldSuit), announced with a
@@ -192,6 +203,38 @@ class GameSimulationService(
             override val playerId: Uuid,
             val spaceId: Uuid,
             val price: Int,
+        ) : TurnEvent
+
+        /**
+         * Movement ended on [spaceId], a SHOP [playerId] already owns with investable headroom
+         * left ([maxCap] > 0) -- paused until [invest] or [declineInvest] decides what to do,
+         * exactly like [ShopPurchaseAvailable] pauses for an unowned shop. [currentValue] is the
+         * shop's value before whatever gets invested. Only ever emitted for a human; a computer
+         * player never invests (no policy exists for it, same gap as stock trading -- see
+         * [ComputerPlayer]), and a shop with no headroom left (max_cap already 0) never pauses
+         * either way -- both are silently a no-op, same as landing on your own shop always was
+         * before investing existed.
+         */
+        data class InvestmentAvailable(
+            override val playerId: Uuid,
+            val spaceId: Uuid,
+            val currentValue: Int,
+            val maxCap: Int,
+        ) : TurnEvent
+
+        /**
+         * [playerId] invested [amount] gold of their own into [spaceId], the shop they were
+         * paused on (see [InvestmentAvailable]), deducted from their gold -- its currentValue is
+         * now [newCurrentValue] and its remaining investable headroom is now [newMaxCap] (see
+         * [invest] for how [amount] gets capped by both of those before this is ever emitted).
+         * Ends the turn right after, exactly like [ShopPurchased] does for a purchase.
+         */
+        data class Invested(
+            override val playerId: Uuid,
+            val spaceId: Uuid,
+            val amount: Int,
+            val newCurrentValue: Int,
+            val newMaxCap: Int,
         ) : TurnEvent
 
         /**
@@ -396,7 +439,7 @@ class GameSimulationService(
                 players = playerSnapshots,
                 shopValues =
                     gameShopInformationDao.findAllByGame(gameId).map {
-                        ShopValueSnapshot(it.spaceId.value, it.currentValue)
+                        ShopValueSnapshot(it.spaceId.value, it.currentValue, it.maxCap)
                     },
                 stockValues =
                     gameDistrictInformationDao.findAllByGame(gameId).map {
@@ -407,12 +450,13 @@ class GameSimulationService(
     }
 
     /**
-     * Whichever decision (if any) [playerId] -- assumed to already be [game]'s activePlayerId --
-     * currently has movement paused on, read back from persisted state rather than live from a move
-     * actually happening: [Game.pendingStockTradeSpaceId] if set (see [checkStockTrade]), otherwise
-     * [Game.currentMovementPoints] read the same way [pendingShopPurchase] (0, sitting on an
-     * unowned shop) and [advanceMovement] (>0, sitting at a branch) already do. Null if none of
-     * those match -- [playerId] just needs to roll.
+     * Whichever decision (if any) [playerId] -- assumed to already be [game]'s activePlayerId
+     * -- currently has movement paused on, read back from persisted state rather than live
+     * from a move actually happening: [Game.pendingStockTradeSpaceId] if set (see
+     * [checkStockTrade]), otherwise [Game.currentMovementPoints] read the same way
+     * [pendingShopPurchase]/[pendingInvestmentDecision] (0, sitting on an unowned or
+     * investable shop) and [advanceMovement] (>0, sitting at a branch) already do. Null if
+     * none of those match -- [playerId] just needs to roll.
      */
     private fun pendingDecisionFor(
         gameId: Uuid,
@@ -431,11 +475,18 @@ class GameSimulationService(
         val spaceId = playerDao.findState(playerId)?.currentSpaceId?.value ?: return null
 
         if (movementPoints == 0) {
-            val shop =
-                gameShopInformationDao.findByGameAndSpace(gameId, spaceId)?.takeIf {
-                    it.ownerId == null
-                } ?: return null
-            return PendingDecisionSnapshot.ShopPurchasePending(spaceId, shop.currentValue)
+            val shop = gameShopInformationDao.findByGameAndSpace(gameId, spaceId) ?: return null
+            if (shop.ownerId == null) {
+                return PendingDecisionSnapshot.ShopPurchasePending(spaceId, shop.currentValue)
+            }
+            if (shop.ownerId.value == playerId && shop.maxCap > 0) {
+                return PendingDecisionSnapshot.InvestmentPending(
+                    spaceId,
+                    shop.currentValue,
+                    shop.maxCap,
+                )
+            }
+            return null
         }
 
         val outgoing = boardGraph.paths.filter { it.fromSpaceId.value == spaceId }
@@ -673,6 +724,93 @@ class GameSimulationService(
         }
 
     /**
+     * Invests [amount] gold (1-[MAX_INVESTMENT_PER_ACTION], see that constant) of [playerId]'s
+     * own gold into the shop they're currently paused on (see [TurnEvent.InvestmentAvailable]),
+     * raising its currentValue by exactly [amount] -- capped by however much investable headroom
+     * it has left (its max_cap, recalculated whenever its owner's dominance in its district
+     * changes -- see [recalculateMaxCaps]) and by [playerId]'s own current gold; fails outright,
+     * investing nothing, if [amount] exceeds either rather than silently investing less. Ends the
+     * turn afterward and chains into any following computer players' turns, exactly as
+     * [buyShop] does for a purchase.
+     */
+    fun invest(gameId: Uuid, playerId: Uuid, amount: Int): Result<List<TurnEvent>> =
+        withGameLock(gameId) {
+            val (game, shop, playersById) =
+                pendingInvestmentDecision(gameId, playerId).getOrElse {
+                    return@withGameLock Result.failure(it)
+                }
+            if (amount !in MIN_INVESTMENT_PER_ACTION..MAX_INVESTMENT_PER_ACTION) {
+                return@withGameLock Result.failure(
+                    InvalidTurnException(
+                        "Investment amount must be between $MIN_INVESTMENT_PER_ACTION and $MAX_INVESTMENT_PER_ACTION gold."
+                    )
+                )
+            }
+            if (amount > shop.maxCap) {
+                return@withGameLock Result.failure(
+                    InvalidTurnException(
+                        "Player $playerId can only invest up to ${shop.maxCap} more gold into this shop."
+                    )
+                )
+            }
+            val gold =
+                currentGold(playerId)
+                    ?: return@withGameLock Result.failure(
+                        InvalidPlayerException("Player $playerId has no state.")
+                    )
+            if (gold < amount) {
+                return@withGameLock Result.failure(
+                    InvalidTurnException(
+                        "Player $playerId can't invest $amount gold -- they only have $gold."
+                    )
+                )
+            }
+
+            playerDao.adjustGold(playerId, -amount)
+            val updated =
+                gameShopInformationDao.applyInvestment(shop.id.value, amount)
+                    ?: return@withGameLock Result.failure(
+                        InvalidTurnException("Shop ${shop.spaceId.value} no longer exists in game $gameId.")
+                    )
+            val investedEvent =
+                TurnEvent.Invested(
+                    playerId = playerId,
+                    spaceId = shop.spaceId.value,
+                    amount = amount,
+                    newCurrentValue = updated.currentValue,
+                    newMaxCap = updated.maxCap,
+                )
+
+            val movement =
+                endTurn(gameId, playerId, game, listOf(investedEvent)).getOrElse {
+                    return@withGameLock Result.failure(it)
+                }
+            val events = movement.events + chainComputerTurns(gameId, movement, playersById)
+
+            return@withGameLock Result.success(events)
+        }
+
+    /**
+     * Declines the pending investment from [TurnEvent.InvestmentAvailable] and ends the turn
+     * without investing.
+     */
+    fun declineInvest(gameId: Uuid, playerId: Uuid): Result<List<TurnEvent>> =
+        withGameLock(gameId) {
+            val (game, _, playersById) =
+                pendingInvestmentDecision(gameId, playerId).getOrElse {
+                    return@withGameLock Result.failure(it)
+                }
+
+            val movement =
+                endTurn(gameId, playerId, game, emptyList()).getOrElse {
+                    return@withGameLock Result.failure(it)
+                }
+            val events = movement.events + chainComputerTurns(gameId, movement, playersById)
+
+            return@withGameLock Result.success(events)
+        }
+
+    /**
      * Buys [quantity] shares (1-99, see [MIN_STOCK_TRADE_QUANTITY]/[MAX_STOCK_TRADE_QUANTITY]) of
      * [districtId]'s stock for [playerId], at that district's current price per share (see
      * [executeBuyStock]) -- resolving the pending decision from [TurnEvent.StockTradingAvailable]
@@ -822,6 +960,46 @@ class GameSimulationService(
     }
 
     /**
+     * Validates that [playerId] actually has an investment decision pending -- i.e. movement ended
+     * this turn exactly on a shop they own with investable headroom left (see
+     * [TurnEvent.InvestmentAvailable]) -- for [invest]/[declineInvest]. Reuses
+     * currentMovementPoints as the pause signal exactly like [pendingShopPurchase] does.
+     */
+    private fun pendingInvestmentDecision(
+        gameId: Uuid,
+        playerId: Uuid,
+    ): Result<Triple<Game, GameShopInformation, Map<Uuid, Player>>> {
+        val game =
+            currentTurnGame(gameId, playerId).getOrElse {
+                return Result.failure(it)
+            }
+        if (game.currentMovementPoints != 0) {
+            return Result.failure(
+                InvalidTurnException("Player $playerId has no investment decision pending.")
+            )
+        }
+
+        val state =
+            playerDao.findState(playerId)
+                ?: return Result.failure(InvalidPlayerException("Player $playerId has no state."))
+        val spaceId =
+            state.currentSpaceId?.value
+                ?: return Result.failure(
+                    InvalidTurnException("Player $playerId has no current space.")
+                )
+        val shop =
+            gameShopInformationDao.findByGameAndSpace(gameId, spaceId)?.takeIf {
+                it.ownerId?.value == playerId && it.maxCap > 0
+            }
+                ?: return Result.failure(
+                    InvalidTurnException("There's no investment decision pending for player $playerId.")
+                )
+
+        val playersById = playerDao.findByGameId(gameId).associateBy { it.id.value }
+        return Result.success(Triple(game, shop, playersById))
+    }
+
+    /**
      * Validates that [playerId] actually has a stock trade decision pending -- i.e. movement paused
      * this turn on a BANK space with stock to trade (see [TurnEvent.StockTradingAvailable]) -- for
      * [buyStock]/[sellStock]/[skipStockTrade]. Unlike [pendingShopPurchase], this doesn't reuse
@@ -942,8 +1120,26 @@ class GameSimulationService(
                     events += purchaseShop(gameId, playerId, shopHere)
                 }
             }
-            // ownerId is never null here -- the branch above already claimed that case -- but a
-            // safe call still reads better than a non-null assertion this far from the check.
+            shopHere != null && shopHere.ownerId?.value == playerId -> {
+                // A computer player never invests (no policy exists for it yet), and a shop
+                // that's already at its ceiling has nothing left to offer either way -- both are
+                // silently a no-op, exactly like landing on your own shop always was before
+                // investing existed.
+                if (!isComputer && shopHere.maxCap > 0) {
+                    gameDao.setMovementPoints(gameId, 0)
+                    events +=
+                        TurnEvent.InvestmentAvailable(
+                            playerId,
+                            currentSpaceId,
+                            shopHere.currentValue,
+                            shopHere.maxCap,
+                        )
+                    return Result.success(MovementResult(events, game))
+                }
+            }
+            // ownerId is never null and never playerId's own here -- both branches above already
+            // claimed those cases -- but a safe call still reads better than a non-null assertion
+            // this far from the check.
             shopHere != null && shopHere.ownerId?.value != playerId -> {
                 events += payToll(playerId, shopHere)
             }
@@ -1044,9 +1240,9 @@ class GameSimulationService(
      * [shop] is in a district -- recalculates max_cap for every shop [playerId] now owns there
      * (including the one just bought), since their dominance level in that district just changed
      * (see [recalculateMaxCaps]). Unlike toll price, a shop's currentValue is never touched by a
-     * purchase -- it only ever grows through direct investment (not yet implemented) -- so there's
-     * nothing here for current_stock_value (derived purely from currentValue, see
-     * GameDistrictInformationDao) to recompute either.
+     * purchase itself -- only [invest] ever raises it -- so there's nothing here for
+     * current_stock_value (derived purely from currentValue, see GameDistrictInformationDao) to
+     * recompute either.
      *
      * Every caller reaches this only after confirming [shop] is unowned (see
      * [pendingShopPurchase]'s own `ownerId == null` filter), and every caller runs under
@@ -1274,46 +1470,34 @@ class GameSimulationService(
      * only callers, and only once that threshold is crossed. Moves [info]'s currentStockValue by
      * its own pre-trade value divided by [STOCK_FLUCTUATION_DIVISOR] (rounded down), plus 1 -- up
      * for a buy ([isBuy] true), down for a sell -- but never lets a sell push it below the
-     * district's minimum: current_stock_value recomputed fresh from [info]'s district's current
-     * shops via [averageStockValue] (the same formula
-     * GameDistrictInformationDao.recalculateCurrentStockValue uses), since shop values -- and so
-     * this floor -- can rise over the course of a game as shops are invested in. The
-     * decision lives here rather than on GameDistrictInformationDao, which just persists whatever
-     * price this settles on (see GameDistrictInformationDao.setCurrentStockValue).
+     * district's base stock value, recomputed fresh from [info]'s district's current shops via
+     * [averageStockValue] (the same formula GameDistrictInformationDao.computeCurrentStockValue
+     * uses), since shop values -- and so this floor -- can rise over the course of a game as shops
+     * are invested in. The decision lives here rather than on GameDistrictInformationDao, which
+     * just persists whatever price this settles on (see
+     * GameDistrictInformationDao.setCurrentStockValue).
      */
     private fun fluctuateStockPrice(gameId: Uuid, info: GameDistrictInformation, isBuy: Boolean) {
         val shops = gameShopInformationDao.findByGameAndDistrict(gameId, info.districtId)
         val delta = info.currentStockValue / STOCK_FLUCTUATION_DIVISOR + 1
         val fluctuated =
             if (isBuy) info.currentStockValue + delta else info.currentStockValue - delta
-        val minimum =
-            if (shops.isEmpty()) info.currentStockValue
-            else averageStockValue(shops, info.minimumStockPercentage)
+        val minimum = if (shops.isEmpty()) info.currentStockValue else averageStockValue(shops)
 
         gameDistrictInformationDao.setCurrentStockValue(info.id.value, maxOf(fluctuated, minimum))
     }
 
     /**
-     * The average currentValue of [shops], multiplied by [minimumStockPercentage] and rounded to
-     * the nearest whole gold -- a district's current_stock_value floor (see [fluctuateStockPrice]).
-     * Mirrors GameDistrictInformationDao's own private seeding/recalculation formula; kept as a
-     * separate copy here rather than shared so that DAO stays limited to querying and persisting,
-     * not deciding prices.
+     * The average currentValue of [shops] (floored, integer division), scaled by
+     * [STOCK_VALUE_NUMERATOR] / [STOCK_VALUE_DENOMINATOR] and floored again -- a district's
+     * current_stock_value floor (see [fluctuateStockPrice]). Mirrors
+     * GameDistrictInformationDao's own private computeCurrentStockValue; kept as a separate copy
+     * here rather than shared so that DAO stays limited to querying and persisting, not deciding
+     * prices.
      */
-    private fun averageStockValue(
-        shops: List<GameShopInformation>,
-        minimumStockPercentage: BigDecimal,
-    ): Int {
-        val average =
-            shops
-                .sumOf { it.currentValue }
-                .toBigDecimal()
-                .divide(
-                    shops.size.toBigDecimal(),
-                    STOCK_AVERAGE_INTERMEDIATE_SCALE,
-                    RoundingMode.HALF_UP,
-                )
-        return (average * minimumStockPercentage).setScale(0, RoundingMode.HALF_UP).toInt()
+    private fun averageStockValue(shops: List<GameShopInformation>): Int {
+        val stockBase = shops.sumOf { it.currentValue } / shops.size
+        return (stockBase * STOCK_VALUE_NUMERATOR) / STOCK_VALUE_DENOMINATOR
     }
 
     /**
@@ -1639,6 +1823,14 @@ class GameSimulationService(
         private const val MIN_STOCK_TRADE_QUANTITY = 1
         private const val MAX_STOCK_TRADE_QUANTITY = 99
 
+        // A single invest call can never move more than this much gold into a shop at once --
+        // an arbitrary but generous per-action ceiling, independent of (and usually smaller than)
+        // however much max_cap headroom or gold the investing player actually has. Since landing
+        // on an owned shop only ever offers one investment decision before the turn ends, a
+        // player can't split a single landing's investment across multiple invest messages.
+        private const val MIN_INVESTMENT_PER_ACTION = 1
+        private const val MAX_INVESTMENT_PER_ACTION = 999
+
         // Above this many shares in one buy or sell, the trade also moves the district's stock
         // price -- see [fluctuateStockPrice].
         private const val STOCK_FLUCTUATION_THRESHOLD = 10
@@ -1647,10 +1839,14 @@ class GameSimulationService(
         // pre-trade value, rounded down, plus 1 -- see [fluctuateStockPrice].
         private const val STOCK_FLUCTUATION_DIVISOR = 16
 
-        // Intermediate scale used only while dividing to compute an average -- rounded away again
-        // once the result is derived, so this just needs to be generous enough not to lose
-        // precision along the way. See [averageStockValue].
-        private const val STOCK_AVERAGE_INTERMEDIATE_SCALE = 10
+        // The real game (per FortuneStreetModding's own board editor's "Tools > Stock Prices"
+        // preview, Editor/MainWindow.xaml.cs, and their district simulator at
+        // fortunestreetmodding.github.io/simulator, src/pages/simulator.js) computes every
+        // district's base stock value with this same fixed 16.16 fixed-point multiplier --
+        // 0x0B00 / 0x10000, roughly 4.3% -- applied identically everywhere. See
+        // [averageStockValue].
+        private const val STOCK_VALUE_NUMERATOR = 0x0B00
+        private const val STOCK_VALUE_DENOMINATOR = 0x10000
         private val SUIT_SPACE_TYPES =
             setOf(SpaceType.HEART, SpaceType.DIAMOND, SpaceType.SPADE, SpaceType.CLUB)
     }

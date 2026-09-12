@@ -136,7 +136,6 @@ export function BoardDetailPage() {
                 />
                 {district.name}
               </h3>
-              <p>Minimum stock percentage: {district.minimumStockPercentage}</p>
               {district.progressions.length > 0 && (
                 <table className="table">
                   <thead>

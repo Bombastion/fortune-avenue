@@ -128,4 +128,21 @@ class GameShopInformationDao {
     fun setMaxCap(id: Uuid, maxCap: Int): GameShopInformation? = transaction {
         GameShopInformation.findById(id)?.apply { this.maxCap = maxCap }
     }
+
+    /**
+     * Applies a player's investment of [amount] gold into shop [id]: raises currentValue and
+     * currentInvestment by [amount], and lowers max_cap by that same amount (headroom just spent)
+     * -- all three in one transaction, so nothing can read this shop mid-update with only some of
+     * them changed. See GameSimulationService.invest, the only caller, which has already validated
+     * [amount] against this shop's remaining max_cap and the investing player's own gold before
+     * ever reaching here -- this never checks anything itself, in keeping with business logic
+     * staying out of DAO classes.
+     */
+    fun applyInvestment(id: Uuid, amount: Int): GameShopInformation? = transaction {
+        GameShopInformation.findById(id)?.apply {
+            currentValue += amount
+            currentInvestment += amount
+            maxCap -= amount
+        }
+    }
 }

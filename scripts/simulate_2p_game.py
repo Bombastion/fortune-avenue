@@ -53,8 +53,8 @@ except ImportError:
 # and one of every suit plus a BANK space (required by the server, and needed
 # to exercise the promotion payout). Decimal fields are written out by hand
 # below (not built with json.dumps) so the trailing zeros survive -- the
-# server requires basePricePercentage / minimumStockPercentage / the boost
-# percentages to have *exactly* 4 digits after the decimal point, and
+# server requires basePricePercentage / the boost percentages to have
+# *exactly* 4 digits after the decimal point, and
 # json.dumps(0.2500) would collapse that to "0.25".
 # ---------------------------------------------------------------------------
 BOARD_BODY = """{
@@ -96,7 +96,6 @@ BOARD_BODY = """{
     {
       "name": "Blue District",
       "colorHex": "1E90FF",
-      "minimumStockPercentage": 0.5000,
       "progressions": [
         { "ownedShopCount": 2, "priceMultiplier": 1.1000, "maxCapitalMultiplier": 1.1500 }
       ]
@@ -104,7 +103,6 @@ BOARD_BODY = """{
     {
       "name": "Red District",
       "colorHex": "DC143C",
-      "minimumStockPercentage": 0.5000,
       "progressions": [
         { "ownedShopCount": 2, "priceMultiplier": 1.1000, "maxCapitalMultiplier": 1.1500 }
       ]

@@ -158,6 +158,7 @@ class GameSimulationServiceTest {
         districtId: Uuid? = null,
         basePricePercentage: BigDecimal = BigDecimal("0.1000"),
         baseValue: Int = currentValue,
+        maxCap: Int = 0,
     ): GameShopInformation {
         val shop = mock(GameShopInformation::class.java)
         lenient().`when`(shop.id).thenReturn(EntityID(Uuid.random(), GameShopInformationTable))
@@ -170,24 +171,18 @@ class GameSimulationServiceTest {
             .`when`(shop.districtId)
             .thenReturn(districtId?.let { EntityID(it, DistrictsTable) })
         lenient().`when`(shop.basePricePercentage).thenReturn(basePricePercentage)
+        lenient().`when`(shop.maxCap).thenReturn(maxCap)
         return shop
     }
 
-    /**
-     * [minimumStockPercentage] defaults to an arbitrary mid-range value so existing tests don't
-     * have to think about it unless they're actually testing [GameSimulationService]'s stock price
-     * fluctuation, which reads it to work out a district's price floor.
-     */
     private fun mockDistrictInfo(
         districtId: Uuid,
         currentStockValue: Int,
-        minimumStockPercentage: BigDecimal = BigDecimal("0.5000"),
     ): GameDistrictInformation {
         val info = mock(GameDistrictInformation::class.java)
         lenient().`when`(info.id).thenReturn(EntityID(Uuid.random(), GameDistrictInformationTable))
         lenient().`when`(info.districtId).thenReturn(EntityID(districtId, DistrictsTable))
         lenient().`when`(info.currentStockValue).thenReturn(currentStockValue)
-        lenient().`when`(info.minimumStockPercentage).thenReturn(minimumStockPercentage)
         return info
     }
 
@@ -1493,7 +1488,7 @@ class GameSimulationServiceTest {
 
         // 11 shares is more than the 10-share threshold -- unlike the 10-share purchase above,
         // this one should also nudge the district's price up: 50 / 16 = 3 (rounded down), + 1 = 4,
-        // so 50 -> 54 (well above the floor of average(100) * 0.5 = 50).
+        // so 50 -> 54 (well above the floor of floor(100 * 0x0B00 / 0x10000) = floor(4.2969) = 4).
         service.buyStock(gameId, playerId, districtId, 11)
 
         verify(gameDistrictInformationDao).setCurrentStockValue(districtInfo.id.value, 54)
@@ -1552,8 +1547,9 @@ class GameSimulationServiceTest {
         val player = mockPlayer(playerId)
         val districtInfo = mockDistrictInfo(districtId, currentStockValue = 40)
         val ownedStock = mockPlayerStock(quantity = 20)
-        // A low shop value keeps the floor (average(10) * 0.5 = 5) well out of the way, so the
-        // fluctuation isn't clamped -- see the dedicated floor test below for that case.
+        // A low shop value keeps the floor (floor(10 * 0x0B00 / 0x10000) = floor(0.4297) = 0)
+        // well out of the way, so the fluctuation isn't clamped -- see the dedicated floor test
+        // below for that case.
         val shops = listOf(mockShop(Uuid.random(), currentValue = 10, districtId = districtId))
         val advancedGame = mockGame(turnOrder = listOf(playerId), turnNumber = 1)
         given(gameDao.findById(gameId)).willReturn(game)
@@ -1587,9 +1583,10 @@ class GameSimulationServiceTest {
         val player = mockPlayer(playerId)
         val districtInfo = mockDistrictInfo(districtId, currentStockValue = 40)
         val ownedStock = mockPlayerStock(quantity = 20)
-        // average(80) * 0.5 = 40 -- exactly what an unclamped fluctuation (40 - (40 / 16 + 1) =
-        // 37) would otherwise fall below.
-        val shops = listOf(mockShop(Uuid.random(), currentValue = 80, districtId = districtId))
+        // floor(940 * 0x0B00 / 0x10000) = floor(940 * 2816 / 65536) = floor(2647040 / 65536) =
+        // floor(40.390625) = 40 -- exactly what an unclamped fluctuation (40 - (40 / 16 + 1) = 37)
+        // would otherwise fall below.
+        val shops = listOf(mockShop(Uuid.random(), currentValue = 940, districtId = districtId))
         val advancedGame = mockGame(turnOrder = listOf(playerId), turnNumber = 1)
         given(gameDao.findById(gameId)).willReturn(game)
         given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
@@ -2387,6 +2384,247 @@ class GameSimulationServiceTest {
         // Nothing changes currentValue anymore, so there's nothing for the district's stock value
         // to be re-averaged from.
         verifyNoInteractions(gameDistrictInformationDao)
+    }
+
+    // --- landing on your own shop offers an investment ---
+
+    @Test
+    fun `rollDice offers to invest when movement ends on an owned shop with headroom left`() {
+        val playerId = Uuid.random()
+        val spaceId = Uuid.random()
+        val shopSpaceId = Uuid.random()
+        val game = mockGame(turnOrder = listOf(playerId))
+        val player = mockPlayer(playerId)
+        val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceId)
+        val board = mockBoard()
+        val boardGraph =
+            BoardGraph(
+                board = board,
+                spaces = emptyList(),
+                paths = listOf(mockPath(spaceId, shopSpaceId, 0)),
+            )
+        val shop =
+            mockShop(spaceId = shopSpaceId, currentValue = 250, ownerId = playerId, maxCap = 50)
+        given(gameDao.findById(gameId)).willReturn(game)
+        given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
+        given(playerDao.findState(playerId)).willReturn(playerState)
+        given(boardDao.findById(boardId)).willReturn(boardGraph)
+        given(dice.roll()).willReturn(1)
+        given(gameShopInformationDao.findByGameAndSpace(gameId, shopSpaceId)).willReturn(shop)
+
+        val result = service.rollDice(gameId, playerId)
+
+        assertThat(result.getOrNull())
+            .containsExactly(
+                GameSimulationService.TurnEvent.DiceRolled(playerId, 1),
+                GameSimulationService.TurnEvent.Moved(playerId, 0, spaceId, shopSpaceId, 0),
+                GameSimulationService.TurnEvent.InvestmentAvailable(playerId, shopSpaceId, 250, 50),
+            )
+        verify(gameDao).setMovementPoints(gameId, 0)
+        verify(gameDao, never()).advanceTurn(gameId)
+    }
+
+    @Test
+    fun `a computer player never pauses to invest, even landing on its own shop with headroom`() {
+        val computerId = Uuid.random()
+        val otherPlayerId = Uuid.random()
+        val spaceId = Uuid.random()
+        val shopSpaceId = Uuid.random()
+        val turnOrder = listOf(computerId, otherPlayerId)
+        val game = mockGame(turnOrder = turnOrder, turnNumber = 0, maxTurns = 10)
+        val computer = mockPlayer(computerId, userId = null)
+        val otherPlayer = mockPlayer(otherPlayerId)
+        val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceId)
+        val board = mockBoard()
+        val boardGraph =
+            BoardGraph(
+                board = board,
+                spaces = emptyList(),
+                paths = listOf(mockPath(spaceId, shopSpaceId, 0)),
+            )
+        val shop =
+            mockShop(spaceId = shopSpaceId, currentValue = 250, ownerId = computerId, maxCap = 50)
+        val advancedGame = mockGame(turnOrder = turnOrder, turnNumber = 1)
+        given(gameDao.findById(gameId)).willReturn(game)
+        given(playerDao.findByGameId(gameId)).willReturn(listOf(computer, otherPlayer))
+        given(playerDao.findState(computerId)).willReturn(playerState)
+        given(boardDao.findById(boardId)).willReturn(boardGraph)
+        given(dice.roll()).willReturn(1)
+        given(gameShopInformationDao.findByGameAndSpace(gameId, shopSpaceId)).willReturn(shop)
+        given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
+
+        val result = service.rollDice(gameId, computerId)
+
+        assertThat(result.getOrNull())
+            .containsExactly(
+                GameSimulationService.TurnEvent.DiceRolled(computerId, 1),
+                GameSimulationService.TurnEvent.Moved(computerId, 0, spaceId, shopSpaceId, 0),
+                GameSimulationService.TurnEvent.TurnEnded(computerId, 0, gameOver = false),
+                GameSimulationService.TurnEvent.TurnStarted(otherPlayerId, 1),
+            )
+        verify(gameDao, never()).setMovementPoints(gameId, 0)
+        verify(gameShopInformationDao, never()).applyInvestment(any(), any())
+    }
+
+    // --- invest / declineInvest ---
+
+    @Test
+    fun `invest fails when there's no investment decision pending`() {
+        val playerId = Uuid.random()
+        val game = mockGame(turnOrder = listOf(playerId), currentMovementPoints = null)
+        given(gameDao.findById(gameId)).willReturn(game)
+
+        val result = service.invest(gameId, playerId, 100)
+
+        assertThat(result.exceptionOrNull()).isInstanceOf(InvalidTurnException::class.java)
+        verifyNoInteractions(gameShopInformationDao)
+    }
+
+    @Test
+    fun `invest fails when a branch choice is pending mid-movement, not an investment`() {
+        val playerId = Uuid.random()
+        val game = mockGame(turnOrder = listOf(playerId), currentMovementPoints = 2)
+        given(gameDao.findById(gameId)).willReturn(game)
+
+        val result = service.invest(gameId, playerId, 100)
+
+        assertThat(result.exceptionOrNull()).isInstanceOf(InvalidTurnException::class.java)
+        verifyNoInteractions(gameShopInformationDao)
+    }
+
+    @Test
+    fun `invest fails when the shop the player is standing on has no headroom left`() {
+        val playerId = Uuid.random()
+        val spaceId = Uuid.random()
+        val game = mockGame(turnOrder = listOf(playerId), currentMovementPoints = 0)
+        val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceId)
+        val shop = mockShop(spaceId = spaceId, currentValue = 200, ownerId = playerId, maxCap = 0)
+        given(gameDao.findById(gameId)).willReturn(game)
+        given(playerDao.findState(playerId)).willReturn(playerState)
+        given(gameShopInformationDao.findByGameAndSpace(gameId, spaceId)).willReturn(shop)
+
+        val result = service.invest(gameId, playerId, 100)
+
+        assertThat(result.exceptionOrNull()).isInstanceOf(InvalidTurnException::class.java)
+        verify(gameShopInformationDao, never()).applyInvestment(any(), any())
+    }
+
+    @Test
+    fun `invest fails for an amount outside 1-999`() {
+        val playerId = Uuid.random()
+        val spaceId = Uuid.random()
+        val game = mockGame(turnOrder = listOf(playerId), currentMovementPoints = 0)
+        val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceId)
+        val shop = mockShop(spaceId = spaceId, currentValue = 200, ownerId = playerId, maxCap = 500)
+        given(gameDao.findById(gameId)).willReturn(game)
+        given(playerDao.findState(playerId)).willReturn(playerState)
+        given(gameShopInformationDao.findByGameAndSpace(gameId, spaceId)).willReturn(shop)
+
+        assertThat(service.invest(gameId, playerId, 0).exceptionOrNull())
+            .isInstanceOf(InvalidTurnException::class.java)
+        assertThat(service.invest(gameId, playerId, -50).exceptionOrNull())
+            .isInstanceOf(InvalidTurnException::class.java)
+        assertThat(service.invest(gameId, playerId, 1000).exceptionOrNull())
+            .isInstanceOf(InvalidTurnException::class.java)
+        verifyNoInteractions(gameShopInformationDao)
+    }
+
+    @Test
+    fun `invest fails when the amount exceeds the shop's remaining max_cap`() {
+        val playerId = Uuid.random()
+        val spaceId = Uuid.random()
+        val game = mockGame(turnOrder = listOf(playerId), currentMovementPoints = 0)
+        val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceId)
+        val shop = mockShop(spaceId = spaceId, currentValue = 200, ownerId = playerId, maxCap = 50)
+        given(gameDao.findById(gameId)).willReturn(game)
+        given(playerDao.findState(playerId)).willReturn(playerState)
+        given(gameShopInformationDao.findByGameAndSpace(gameId, spaceId)).willReturn(shop)
+
+        val result = service.invest(gameId, playerId, 51)
+
+        assertThat(result.exceptionOrNull()).isInstanceOf(InvalidTurnException::class.java)
+        verify(gameShopInformationDao, never()).applyInvestment(shop.id.value, 51)
+    }
+
+    @Test
+    fun `invest fails when the player can't afford the amount, even though it's within max_cap`() {
+        val playerId = Uuid.random()
+        val spaceId = Uuid.random()
+        val game = mockGame(turnOrder = listOf(playerId), currentMovementPoints = 0)
+        val shop = mockShop(spaceId = spaceId, currentValue = 200, ownerId = playerId, maxCap = 500)
+        val playerState =
+            mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceId, currentGold = 80)
+        given(gameDao.findById(gameId)).willReturn(game)
+        given(gameShopInformationDao.findByGameAndSpace(gameId, spaceId)).willReturn(shop)
+        given(playerDao.findState(playerId)).willReturn(playerState)
+
+        val result = service.invest(gameId, playerId, 100)
+
+        assertThat(result.exceptionOrNull()).isInstanceOf(InvalidTurnException::class.java)
+        verify(gameShopInformationDao, never()).applyInvestment(shop.id.value, 100)
+        verify(playerDao, never()).adjustGold(playerId, -100)
+    }
+
+    @Test
+    fun `invest deducts gold, raises currentValue, lowers max_cap, and ends the turn`() {
+        val playerId = Uuid.random()
+        val spaceId = Uuid.random()
+        val game = mockGame(turnOrder = listOf(playerId), turnNumber = 0, currentMovementPoints = 0)
+        val player = mockPlayer(playerId)
+        val shop = mockShop(spaceId = spaceId, currentValue = 200, ownerId = playerId, maxCap = 500)
+        val playerState =
+            mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceId, currentGold = 1000)
+        val invested =
+            mockShop(spaceId = spaceId, currentValue = 300, ownerId = playerId, maxCap = 400)
+        val advancedGame = mockGame(turnOrder = listOf(playerId), turnNumber = 1)
+        given(gameDao.findById(gameId)).willReturn(game)
+        given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
+        given(playerDao.findState(playerId)).willReturn(playerState)
+        given(gameShopInformationDao.findByGameAndSpace(gameId, spaceId)).willReturn(shop)
+        given(gameShopInformationDao.applyInvestment(shop.id.value, 100)).willReturn(invested)
+        given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
+
+        val result = service.invest(gameId, playerId, 100)
+
+        assertThat(result.getOrNull())
+            .containsExactly(
+                GameSimulationService.TurnEvent.Invested(
+                    playerId = playerId,
+                    spaceId = spaceId,
+                    amount = 100,
+                    newCurrentValue = 300,
+                    newMaxCap = 400,
+                ),
+                GameSimulationService.TurnEvent.TurnEnded(playerId, 0, gameOver = false),
+                GameSimulationService.TurnEvent.TurnStarted(playerId, 1),
+            )
+        verify(playerDao).adjustGold(playerId, -100)
+        verify(gameShopInformationDao).applyInvestment(shop.id.value, 100)
+    }
+
+    @Test
+    fun `declineInvest ends the turn without investing`() {
+        val playerId = Uuid.random()
+        val spaceId = Uuid.random()
+        val game = mockGame(turnOrder = listOf(playerId), turnNumber = 0, currentMovementPoints = 0)
+        val player = mockPlayer(playerId)
+        val playerState = mockPlayerState(PlayerStatus.READY, currentSpaceId = spaceId)
+        val shop = mockShop(spaceId = spaceId, currentValue = 200, ownerId = playerId, maxCap = 500)
+        val advancedGame = mockGame(turnOrder = listOf(playerId), turnNumber = 1)
+        given(gameDao.findById(gameId)).willReturn(game)
+        given(playerDao.findByGameId(gameId)).willReturn(listOf(player))
+        given(playerDao.findState(playerId)).willReturn(playerState)
+        given(gameShopInformationDao.findByGameAndSpace(gameId, spaceId)).willReturn(shop)
+        given(gameDao.advanceTurn(gameId)).willReturn(advancedGame)
+
+        val result = service.declineInvest(gameId, playerId)
+
+        assertThat(result.getOrNull())
+            .containsExactly(
+                GameSimulationService.TurnEvent.TurnEnded(playerId, 0, gameOver = false),
+                GameSimulationService.TurnEvent.TurnStarted(playerId, 1),
+            )
+        verify(gameShopInformationDao, never()).applyInvestment(any(), any())
     }
 
     @Test

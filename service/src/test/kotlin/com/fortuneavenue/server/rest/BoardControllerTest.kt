@@ -182,7 +182,7 @@ class BoardControllerTest : DatabaseTest() {
             validRequest("district-${Uuid.random()}")
                 .copy(
                     districts =
-                        listOf(CreateDistrictRequest("Red", "FF0000", BigDecimal("0.5000"))),
+                        listOf(CreateDistrictRequest("Red", "FF0000")),
                     spaces =
                         listOf(
                             CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0),
@@ -210,10 +210,7 @@ class BoardControllerTest : DatabaseTest() {
     fun `creating a board with a district that has an invalid colorHex returns 400`() {
         val request =
             validRequest("district-invalid-${Uuid.random()}")
-                .copy(
-                    districts =
-                        listOf(CreateDistrictRequest("Red", "not-a-color", BigDecimal("0.5000")))
-                )
+                .copy(districts = listOf(CreateDistrictRequest("Red", "not-a-color")))
 
         val response = restTemplate.postForEntity<ErrorResponse>("/boards", request)
 
@@ -231,7 +228,6 @@ class BoardControllerTest : DatabaseTest() {
                             CreateDistrictRequest(
                                 name = "Red",
                                 colorHex = "FF0000",
-                                minimumStockPercentage = BigDecimal("0.5000"),
                                 progressions =
                                     listOf(
                                         CreateDistrictProgressionRequest(
@@ -269,7 +265,7 @@ class BoardControllerTest : DatabaseTest() {
             validRequest("district-progression-missing-${Uuid.random()}")
                 .copy(
                     districts =
-                        listOf(CreateDistrictRequest("Red", "FF0000", BigDecimal("0.5000"))),
+                        listOf(CreateDistrictRequest("Red", "FF0000")),
                     spaces =
                         listOf(
                             CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0),

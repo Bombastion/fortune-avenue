@@ -12,7 +12,6 @@
 // accidentally unquote unrelated data.
 const DECIMAL_FIELD_NAMES = [
   "basePricePercentage",
-  "minimumStockPercentage",
   "priceMultiplier",
   "maxCapitalMultiplier",
 ] as const;

@@ -6,8 +6,6 @@ import com.fortuneavenue.server.models.board.db.GameDistrictInformation
 import com.fortuneavenue.server.models.board.db.GameDistrictInformationTable
 import com.fortuneavenue.server.models.board.db.GameShopInformation
 import com.fortuneavenue.server.models.game.db.GamesTable
-import java.math.BigDecimal
-import java.math.RoundingMode
 import kotlin.uuid.Uuid
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.dao.id.EntityID
@@ -15,10 +13,14 @@ import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.springframework.stereotype.Repository
 
-// Intermediate scale used only while dividing to compute an average -- rounded away again once
-// current_stock_value is derived, so this just needs to be generous enough not to lose precision
-// along the way.
-private const val AVERAGE_INTERMEDIATE_SCALE = 10
+// The real game (per FortuneStreetModding's own board editor's "Tools > Stock Prices" preview,
+// Editor/MainWindow.xaml.cs, and their district simulator at
+// fortunestreetmodding.github.io/simulator, src/pages/simulator.js) computes every district's
+// base stock value with one fixed 16.16 fixed-point multiplier applied identically everywhere --
+// not a per-district configurable floor. 0x0B00 / 0x10000 is that multiplier, roughly 4.3%. See
+// [computeCurrentStockValue].
+private const val STOCK_VALUE_NUMERATOR = 0x0B00
+private const val STOCK_VALUE_DENOMINATOR = 0x10000
 
 @Repository
 class GameDistrictInformationDao {
@@ -27,10 +29,9 @@ class GameDistrictInformationDao {
      * Seeds one row per district on [boardGraph] that actually contains at least one SHOP space,
      * using [seededShops] -- the game's just-seeded [GameShopInformation] rows (see
      * GameShopInformationDao.seedForGame, which must run first and whose output is passed in here).
-     * A district's current_stock_value is the average currentValue of its shops in [seededShops]
-     * (equal to baseValue this early in the game), multiplied by the district's
-     * minimumStockPercentage and rounded to the nearest whole gold. Districts with no SHOP spaces
-     * are skipped -- there's nothing to average. Called once, when a game actually starts (see
+     * A district's current_stock_value is [computeCurrentStockValue] of its shops in [seededShops]
+     * (equal to baseValue this early in the game). Districts with no SHOP spaces are skipped --
+     * there's nothing to average. Called once, when a game actually starts (see
      * GameSimulationService.markReady).
      */
     fun seedForGame(
@@ -49,8 +50,7 @@ class GameDistrictInformationDao {
                 this.gameId = EntityID(gameId, GamesTable)
                 districtId = district.id
                 boardId = district.boardId
-                minimumStockPercentage = district.minimumStockPercentage
-                currentStockValue = computeCurrentStockValue(shops, district.minimumStockPercentage)
+                currentStockValue = computeCurrentStockValue(shops)
             }
         }
     }
@@ -77,7 +77,7 @@ class GameDistrictInformationDao {
                 }
                 .firstOrNull() ?: return@transaction null
 
-        info.apply { currentStockValue = computeCurrentStockValue(shops, minimumStockPercentage) }
+        info.apply { currentStockValue = computeCurrentStockValue(shops) }
     }
 
     /**
@@ -121,18 +121,14 @@ class GameDistrictInformationDao {
     }
 
     /**
-     * The average currentValue of [shops], multiplied by [minimumStockPercentage] and rounded to
-     * the nearest whole gold.
+     * The average currentValue of [shops] (floored, integer division), scaled by
+     * [STOCK_VALUE_NUMERATOR] / [STOCK_VALUE_DENOMINATOR] and floored again -- see the constants'
+     * own doc for where this fixed-point multiplier comes from. Mirrors
+     * GameSimulationService.averageStockValue, kept as a separate copy here rather than shared so
+     * that DAO stays limited to querying and persisting, not deciding prices.
      */
-    private fun computeCurrentStockValue(
-        shops: List<GameShopInformation>,
-        minimumStockPercentage: BigDecimal,
-    ): Int {
-        val average =
-            shops
-                .sumOf { it.currentValue }
-                .toBigDecimal()
-                .divide(shops.size.toBigDecimal(), AVERAGE_INTERMEDIATE_SCALE, RoundingMode.HALF_UP)
-        return (average * minimumStockPercentage).setScale(0, RoundingMode.HALF_UP).toInt()
+    private fun computeCurrentStockValue(shops: List<GameShopInformation>): Int {
+        val stockBase = shops.sumOf { it.currentValue } / shops.size
+        return (stockBase * STOCK_VALUE_NUMERATOR) / STOCK_VALUE_DENOMINATOR
     }
 }

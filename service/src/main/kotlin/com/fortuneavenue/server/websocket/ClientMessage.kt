@@ -8,13 +8,18 @@ package com.fortuneavenue.server.websocket
  * pending. `buy_stock` and `sell_stock` need a districtId and a quantity (1-99): `{"type":
  * "buy_stock", "districtId": "<id>", "quantity": 10}` -- which BANK stop they resolve is implied
  * the same way, by whichever `stock_trading_available` event is currently pending.
- * `skip_stock_trade` needs nothing extra, same as `decline_shop`.
+ * `skip_stock_trade` needs nothing extra, same as `decline_shop`. `invest` needs an amount (1-999):
+ * `{"type": "invest", "amount": 500}` -- which shop it applies to is implied the same way as
+ * `buy_shop`, by whichever `investment_available` event is currently pending (movement having just
+ * ended on a shop the sender already owns with room left to invest); `decline_invest` needs
+ * nothing extra, same as `decline_shop`.
  */
 data class ClientMessage(
     val type: String,
     val spaceId: String? = null,
     val districtId: String? = null,
     val quantity: Int? = null,
+    val amount: Int? = null,
 )
 
 object ClientMessageType {
@@ -26,4 +31,6 @@ object ClientMessageType {
     const val BUY_STOCK = "buy_stock"
     const val SELL_STOCK = "sell_stock"
     const val SKIP_STOCK_TRADE = "skip_stock_trade"
+    const val INVEST = "invest"
+    const val DECLINE_INVEST = "decline_invest"
 }

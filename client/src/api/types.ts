@@ -1,14 +1,13 @@
 // TypeScript mirrors of the server's REST DTOs (see
 // service/src/main/kotlin/com/fortuneavenue/server/models/**/rest/*.kt).
 //
-// A note on decimal fields (basePricePercentage, minimumStockPercentage,
-// priceMultiplier, maxCapitalMultiplier): the server deserializes these into
-// java.math.BigDecimal and cares about their exact scale (it requires exactly 4 digits after the
-// decimal point, e.g. "0.5000" not "0.5"). A plain JS `number` can't preserve trailing zeros
-// (JSON.stringify(0.5) is "0.5", not "0.5000"), so on the request side these are typed as
-// `string` -- the exact text the user typed, validated to have exactly 4 digits -- and serialized
-// as unquoted numeric literals by api/json.ts. On the response side the server sends back a plain
-// JSON number, so those are typed as `number`.
+// A note on decimal fields (basePricePercentage, priceMultiplier, maxCapitalMultiplier): the
+// server deserializes these into java.math.BigDecimal and cares about their exact scale (it
+// requires exactly 4 digits after the decimal point, e.g. "0.5000" not "0.5"). A plain JS
+// `number` can't preserve trailing zeros (JSON.stringify(0.5) is "0.5", not "0.5000"), so on the
+// request side these are typed as `string` -- the exact text the user typed, validated to have
+// exactly 4 digits -- and serialized as unquoted numeric literals by api/json.ts. On the response
+// side the server sends back a plain JSON number, so those are typed as `number`.
 
 export const SPACE_TYPES = [
   "BASIC",
@@ -50,7 +49,6 @@ export interface CreateDistrictProgressionRequest {
 export interface CreateDistrictRequest {
   name: string;
   colorHex: string;
-  minimumStockPercentage: string;
   progressions: CreateDistrictProgressionRequest[];
 }
 
@@ -91,7 +89,6 @@ export interface DistrictResponse {
   id: string;
   name: string;
   colorHex: string;
-  minimumStockPercentage: number;
   progressions: DistrictProgressionResponse[];
 }
 

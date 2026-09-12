@@ -22,41 +22,55 @@ private data class Connection(val gameId: Uuid, val playerId: Uuid)
  * Connect as `/ws/game?gameId=<id>&playerId=<id>`. The connection is closed immediately if either
  * id is missing/malformed, or playerId doesn't refer to a real player in that game.
  *
- * Once connected, a client can send `{"type":"ready"}` to mark itself ready (once every human
- * player in the game has, computer players are readied up automatically and turn order is randomly
- * decided as the game starts -- if that puts one or more computer players first, their turns get
- * played out and broadcast immediately, right after the game_started event) and
- * `{"type":"roll_dice"}` on its turn to roll and move forward that many spaces. Every space a
- * player passes or lands on along the way is checked for a `suit_picked_up` event -- landing on or
- * passing a HEART/DIAMOND/ SPADE/CLUB space picks that suit up the first time, broadcast right
- * after the `player_moved` event for that space (nothing is broadcast for a suit already held). The
- * same space is also checked for a `promoted` event -- passing or landing on a BANK space while
- * currently holding all 4 suits clears them all, bumps a promotion count, and pays out gold (named
- * in the event as `goldAwarded`), broadcast right after that space's `player_moved` event (nothing
- * is broadcast for a BANK space visited without every suit in hand). Independent of promotion, that
- * same BANK space is also checked for a `stock_trading_available` event -- if any district has
- * stock to trade in this game, movement pauses there (even mid-move, not just when it's the final
- * stop) with an event naming every tradeable district's `districtId`, `pricePerShare`, and however
- * much of it the player already owns -- respond with
- * `{"type":"buy_stock","districtId":"<id>","quantity":10}`,
- * `{"type":"sell_stock","districtId":"<id>","quantity":10}` (quantity is 1-99 either way), or
- * `{"type":"skip_stock_trade"}` to resolve it and keep moving; `buy_stock`/`sell_stock` come back
- * as an `error` instead if the trade isn't affordable/owned, leaving the decision still pending.
- * Buying or selling broadcasts `stock_purchased`/`stock_sold`. If that movement reaches a space
- * with more than one path out of it, it pauses there and a `choice_required` event lists the
- * options -- respond with `{"type":"choose_path","spaceId":"<id>"}` to pick one and keep moving. If
- * movement instead runs out on an unowned shop, it pauses there too with a
- * `shop_purchase_available` event naming the price -- respond with `{"type":"buy_shop"}` or
- * `{"type":"decline_shop"}` to decide -- `buy_shop` comes back as an `error` instead if the player
- * can't afford the price, leaving the decision still pending. Buying broadcasts `shop_purchased`,
- * followed by `district_values_recalculated` if it brought the buyer's owned count in that shop's
- * district to 2 or more. Any computer players whose turns immediately follow (once the current
- * player's turn actually ends) are played out automatically too, each broadcast in turn order right
- * after the requested one -- including their own shop purchase and stock trade decisions, made
- * immediately rather than paused on. The moment that chain lands on a human player, a
- * `turn_started` event names them -- computer turns don't get one, since their own
- * dice_rolled/player_moved events already make it obvious whose turn it was. See
- * GameSimulationService for the actual rules.
+ * Once connected, a client can send `{"type":"ready"}` to mark itself ready (once every
+ * human player in the game has, computer players are readied up automatically and turn
+ * order is randomly decided as the game starts -- if that puts one or more computer
+ * players first, their turns get played out and broadcast immediately, right after the
+ * game_started event), then `{"type":"roll_dice"}` on its turn to roll and move forward
+ * that many spaces. Every space a player passes or lands on along the way is checked for a
+ * `suit_picked_up` event -- landing on or passing a HEART/DIAMOND/SPADE/CLUB space picks
+ * that suit up the first time, broadcast right after the `player_moved` event for that
+ * space (nothing is broadcast for a suit already held). The same space is also checked for
+ * a `promoted` event -- passing or landing on a BANK space while currently holding all 4
+ * suits clears them all, bumps a promotion count, and pays out gold (named in the event as
+ * `goldAwarded`), broadcast right after that space's `player_moved` event (nothing is
+ * broadcast for a BANK space visited without every suit in hand). Independent of
+ * promotion, that same BANK space is also checked for a `stock_trading_available` event --
+ * if any district has stock to trade in this game, movement pauses there (even mid-move,
+ * not just when it's the final stop) with an event naming every tradeable district's
+ * `districtId`, `pricePerShare`, and however much of it the player already owns -- respond
+ * with `{"type":"buy_stock","districtId":"<id>","quantity":10}`,
+ * `{"type":"sell_stock","districtId":"<id>","quantity":10}` (quantity is 1-99 either way),
+ * or `{"type":"skip_stock_trade"}` to resolve it and keep moving; `buy_stock`/`sell_stock`
+ * come back as an `error` instead if the trade isn't affordable/owned, leaving the
+ * decision still pending. Buying or selling broadcasts `stock_purchased`/`stock_sold`. If
+ * that movement reaches a space with more than one path out of it, it pauses there and a
+ * `choice_required` event lists the options -- respond with
+ * `{"type":"choose_path","spaceId":"<id>"}` to pick one and keep moving. If movement
+ * instead runs out on an unowned shop, it pauses there too with a
+ * `shop_purchase_available` event naming the price -- respond with `{"type":"buy_shop"}`
+ * or `{"type":"decline_shop"}` to decide -- `buy_shop` comes back as an `error` instead if
+ * the player can't afford the price, leaving the decision still pending. Buying broadcasts
+ * `shop_purchased`; it never changes any shop's value by itself -- but if it brought the
+ * buyer's owned count in that shop's district to 2 or more, every shop they own there
+ * (including the one just bought) silently gets its investable headroom, and every future
+ * toll it charges, recalculated for that new count. If movement instead runs out on a shop
+ * the player already owns, and that shop still has investable headroom left, it pauses
+ * there too with an `investment_available` event naming the shop's currentValue and
+ * remaining headroom (max_cap) -- respond with `{"type":"invest","amount":500}` (1-999,
+ * further capped by that headroom and by the player's own gold) or
+ * `{"type":"decline_invest"}` to decide -- `invest` comes back as an `error` instead if
+ * the amount is out of bounds, leaving the decision still pending. Investing broadcasts
+ * `invested`, naming the shop's new currentValue and remaining headroom; landing on an
+ * owned shop with no headroom left doesn't pause at all -- exactly as landing on one you
+ * own always did before investing existed. Any computer players whose turns immediately
+ * follow (once the current player's turn actually ends) are played out automatically too,
+ * each broadcast in turn order right after the requested one -- including their own shop
+ * purchase and stock trade decisions, made immediately rather than paused on (a computer
+ * player never invests either, landing on its own shop always being a no-op for it). The
+ * moment that chain lands on a human player, a `turn_started` event names them -- computer
+ * turns don't get one, since their own dice_rolled/player_moved events already make it
+ * obvious whose turn it was. See GameSimulationService for the actual rules.
  *
  * Session bookkeeping (who's connected to which game) lives in memory on this instance -- unlike
  * the rest of this class, which just delegates to PlayerDao/GameSimulationService, this part
@@ -160,6 +174,8 @@ class GameWebSocketHandler(
                     clientMessage.quantity,
                 )
             ClientMessageType.SKIP_STOCK_TRADE -> handleSkipStockTrade(session, connection)
+            ClientMessageType.INVEST -> handleInvest(session, connection, clientMessage.amount)
+            ClientMessageType.DECLINE_INVEST -> handleDeclineInvest(session, connection)
             else -> send(session, ErrorEvent("Unrecognized message: ${message.payload}"))
         }
     }
@@ -321,6 +337,35 @@ class GameWebSocketHandler(
             )
     }
 
+    private fun handleInvest(session: WebSocketSession, connection: Connection, amount: Int?) {
+        val parsedAmount =
+            amount ?: return send(session, ErrorEvent("invest requires an amount."))
+
+        gameSimulationService
+            .invest(connection.gameId, connection.playerId, parsedAmount)
+            .fold(
+                onSuccess = { events ->
+                    events.forEach { event -> broadcastTurnEvent(connection.gameId, event) }
+                },
+                onFailure = { error ->
+                    send(session, ErrorEvent(error.message ?: "Unable to invest."))
+                },
+            )
+    }
+
+    private fun handleDeclineInvest(session: WebSocketSession, connection: Connection) {
+        gameSimulationService
+            .declineInvest(connection.gameId, connection.playerId)
+            .fold(
+                onSuccess = { events ->
+                    events.forEach { event -> broadcastTurnEvent(connection.gameId, event) }
+                },
+                onFailure = { error ->
+                    send(session, ErrorEvent(error.message ?: "Unable to decline investing."))
+                },
+            )
+    }
+
     private fun broadcastTurnEvent(gameId: Uuid, event: GameSimulationService.TurnEvent) {
         broadcast(gameId, event.toWireEvent())
         if (event is GameSimulationService.TurnEvent.TurnEnded && event.gameOver) {
@@ -356,6 +401,15 @@ class GameWebSocketHandler(
                         price = it.price,
                     )
                 },
+            pendingInvestmentAvailable =
+                (pendingDecision as? PendingDecisionSnapshot.InvestmentPending)?.let {
+                    InvestmentAvailableEvent(
+                        playerId = activePlayer!!,
+                        spaceId = it.spaceId.toString(),
+                        currentValue = it.currentValue,
+                        maxCap = it.maxCap,
+                    )
+                },
             pendingStockTradingAvailable =
                 (pendingDecision as? PendingDecisionSnapshot.StockTradePending)?.let {
                     StockTradingAvailableEvent(
@@ -386,6 +440,7 @@ class GameWebSocketHandler(
                     )
                 },
             shopValuesBySpaceId = shopValues.associate { it.spaceId.toString() to it.currentValue },
+            shopMaxCapsBySpaceId = shopValues.associate { it.spaceId.toString() to it.maxCap },
             stockValuesByDistrictId =
                 stockValues.associate { it.districtId.toString() to it.currentStockValue },
         )
@@ -434,6 +489,21 @@ class GameWebSocketHandler(
                     playerId = playerId.toString(),
                     spaceId = spaceId.toString(),
                     price = price,
+                )
+            is GameSimulationService.TurnEvent.InvestmentAvailable ->
+                InvestmentAvailableEvent(
+                    playerId = playerId.toString(),
+                    spaceId = spaceId.toString(),
+                    currentValue = currentValue,
+                    maxCap = maxCap,
+                )
+            is GameSimulationService.TurnEvent.Invested ->
+                InvestedEvent(
+                    playerId = playerId.toString(),
+                    spaceId = spaceId.toString(),
+                    amount = amount,
+                    newCurrentValue = newCurrentValue,
+                    newMaxCap = newMaxCap,
                 )
             is GameSimulationService.TurnEvent.TollPaid ->
                 TollPaidEvent(
