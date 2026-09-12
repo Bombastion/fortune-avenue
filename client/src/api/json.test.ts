@@ -19,7 +19,6 @@ describe("serializeRequestWithDecimals", () => {
       name: "Board",
       districts: [
         {
-          minimumStockPercentage: "0.5000",
           progressions: [
             { ownedShopCount: 2, priceMultiplier: "1.1000", maxCapitalMultiplier: "1.2000" },
           ],
@@ -29,13 +28,12 @@ describe("serializeRequestWithDecimals", () => {
 
     const json = serializeRequestWithDecimals(request);
 
-    expect(json).toContain('"minimumStockPercentage":0.5000');
     expect(json).toContain('"priceMultiplier":1.1000');
     expect(json).toContain('"maxCapitalMultiplier":1.2000');
 
     const parsed = JSON.parse(json);
-    expect(parsed.districts[0].minimumStockPercentage).toBe(0.5);
     expect(parsed.districts[0].progressions[0].priceMultiplier).toBe(1.1);
+    expect(parsed.districts[0].progressions[0].maxCapitalMultiplier).toBe(1.2);
   });
 
   it("leaves unrelated fields quoted, even ones with a similar-looking value", () => {

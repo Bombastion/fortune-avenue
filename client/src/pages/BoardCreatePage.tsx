@@ -335,7 +335,6 @@ export function BoardCreatePage() {
               }
               nameError={fieldErrors[`districts.${index}.name`]}
               colorHexError={fieldErrors[`districts.${index}.colorHex`]}
-              minimumStockPercentageError={fieldErrors[`districts.${index}.minimumStockPercentage`]}
               fieldErrors={fieldErrors}
             />
           ))}
@@ -559,7 +558,6 @@ interface DistrictItemProps {
   ) => void;
   nameError?: string;
   colorHexError?: string;
-  minimumStockPercentageError?: string;
   fieldErrors: Record<string, string>;
 }
 
@@ -574,7 +572,6 @@ function DistrictItem({
   onProgressionChange,
   nameError,
   colorHexError,
-  minimumStockPercentageError,
   fieldErrors,
 }: DistrictItemProps) {
   const levels = requiredProgressionLevels(spaceCount);
@@ -591,9 +588,9 @@ function DistrictItem({
       open={open}
       onToggle={onToggle}
       onRemove={onRemove}
-      hasError={!!nameError || !!colorHexError || !!minimumStockPercentageError || hasProgressionError}
+      hasError={!!nameError || !!colorHexError || hasProgressionError}
     >
-      <div className="grid grid--3">
+      <div className="grid grid--2">
         <Field label="Name" error={nameError}>
           <input
             type="text"
@@ -615,19 +612,6 @@ function DistrictItem({
               placeholder="1E90FF"
             />
           </div>
-        </Field>
-        <Field
-          label="Minimum stock percentage"
-          error={minimumStockPercentageError}
-          hint="Strictly between 0 and 1, e.g. .5 or 0.5"
-        >
-          <input
-            type="text"
-            inputMode="decimal"
-            value={district.minimumStockPercentage}
-            onChange={(e) => onChange({ minimumStockPercentage: e.target.value })}
-            placeholder=".5"
-          />
         </Field>
       </div>
 

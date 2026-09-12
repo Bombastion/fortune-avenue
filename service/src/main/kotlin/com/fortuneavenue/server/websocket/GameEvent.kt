@@ -86,6 +86,34 @@ data class ShopPurchasedEvent(
 ) : GameEvent
 
 /**
+ * Movement ended on [spaceId], a SHOP [playerId] already owns with investable headroom left
+ * ([maxCap] > 0) -- paused until [playerId] sends `invest` or `decline_invest` to decide what to
+ * do, exactly like [ShopPurchaseAvailableEvent] pauses for an unowned shop. [currentValue] is the
+ * shop's value before whatever gets invested.
+ */
+data class InvestmentAvailableEvent(
+    val playerId: String,
+    val spaceId: String,
+    val currentValue: Int,
+    val maxCap: Int,
+    override val type: String = "investment_available",
+) : GameEvent
+
+/**
+ * [playerId] invested [amount] gold into the shop they were paused on at [spaceId], deducted from
+ * their gold -- its currentValue is now [newCurrentValue] and its remaining investable headroom is
+ * now [newMaxCap]. Followed by a turn_ended, exactly like [ShopPurchasedEvent] is for a purchase.
+ */
+data class InvestedEvent(
+    val playerId: String,
+    val spaceId: String,
+    val amount: Int,
+    val newCurrentValue: Int,
+    val newMaxCap: Int,
+    override val type: String = "invested",
+) : GameEvent
+
+/**
  * [playerId] landed on [spaceId], a SHOP owned by [ownerId], and paid them [amount] gold in toll.
  */
 data class TollPaidEvent(
@@ -171,10 +199,11 @@ data class PlayerSnapshotPayload(
  * Sent once, right after [ConnectedEvent], so a client connecting (or reconnecting) partway through
  * a game doesn't have to have seen every event live to know where things stand -- see
  * GameSimulationService.getSnapshot. [pendingChoiceRequired]/[pendingShopPurchaseAvailable]/
- * [pendingStockTradingAvailable] deliberately reuse those events' own shape (playerId and all)
- * rather than inventing a new one, so a client can fold whichever one is non-null onto its state
- * the exact same way it would the live event that originally caused that pause -- at most one is
- * ever non-null, naming whatever [activePlayerId] currently has movement paused on.
+ * [pendingInvestmentAvailable]/[pendingStockTradingAvailable] deliberately reuse those events' own
+ * shape (playerId and all) rather than inventing a new one, so a client can fold whichever one is
+ * non-null onto its state the exact same way it would the live event that originally caused that
+ * pause -- at most one is ever non-null, naming whatever [activePlayerId] currently has movement
+ * paused on.
  */
 data class GameStateSnapshotEvent(
     val turnOrder: List<String>?,
@@ -183,9 +212,17 @@ data class GameStateSnapshotEvent(
     val activePlayerId: String?,
     val pendingChoiceRequired: ChoiceRequiredEvent? = null,
     val pendingShopPurchaseAvailable: ShopPurchaseAvailableEvent? = null,
+    val pendingInvestmentAvailable: InvestmentAvailableEvent? = null,
     val pendingStockTradingAvailable: StockTradingAvailableEvent? = null,
     val players: List<PlayerSnapshotPayload>,
     val shopValuesBySpaceId: Map<String, Int>,
+    /**
+     * Every SHOP space's current investable headroom in this game, owned or not (0 for an unowned
+     * one -- see GameShopInformationDao.seedForGame) -- lets a reconnecting client know how much
+     * more it can `invest` into a shop it owns without having seen every `shop_purchased`/
+     * `invested` event that shaped that number live.
+     */
+    val shopMaxCapsBySpaceId: Map<String, Int>,
     val stockValuesByDistrictId: Map<String, Int>,
     override val type: String = "game_state",
 ) : GameEvent

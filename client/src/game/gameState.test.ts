@@ -29,7 +29,7 @@ function board(): BoardResponse {
       { from: "space-1", to: "space-2", branchOrder: 0 },
       { from: "space-2", to: "space-0", branchOrder: 0 },
     ],
-    districts: [{ id: "district-1", name: "Uptown", colorHex: "FF00AA", minimumStockPercentage: 0.1, progressions: [] }],
+    districts: [{ id: "district-1", name: "Uptown", colorHex: "FF00AA", progressions: [] }],
   };
 }
 

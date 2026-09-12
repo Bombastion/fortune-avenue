@@ -43,7 +43,7 @@ class DistrictProgressionValidatorTest {
         val req =
             request(
                 spaces = listOf(CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0)),
-                districts = listOf(CreateDistrictRequest("Red", "FF0000", BigDecimal("0.5000"))),
+                districts = listOf(CreateDistrictRequest("Red", "FF0000")),
             )
 
         assertThat(DistrictProgressionValidator.validate(req)).isEmpty()
@@ -59,7 +59,6 @@ class DistrictProgressionValidatorTest {
                         CreateDistrictRequest(
                             "Red",
                             "FF0000",
-                            minimumStockPercentage = BigDecimal("0.5000"),
                             progressions = listOf(progression(2)),
                         )
                     ),
@@ -85,7 +84,6 @@ class DistrictProgressionValidatorTest {
                         CreateDistrictRequest(
                             "Red",
                             "FF0000",
-                            minimumStockPercentage = BigDecimal("0.5000"),
                             progressions = listOf(progression(2)),
                         )
                     ),
@@ -105,7 +103,6 @@ class DistrictProgressionValidatorTest {
                         CreateDistrictRequest(
                             "Red",
                             "FF0000",
-                            minimumStockPercentage = BigDecimal("0.5000"),
                             progressions = listOf(progression(2), progression(3)),
                         )
                     ),
@@ -120,7 +117,6 @@ class DistrictProgressionValidatorTest {
                         CreateDistrictRequest(
                             "Red",
                             "FF0000",
-                            minimumStockPercentage = BigDecimal("0.5000"),
                             progressions = listOf(progression(2)),
                         )
                     ),
@@ -140,7 +136,7 @@ class DistrictProgressionValidatorTest {
                         CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0),
                         CreateBoardSpaceRequest(SpaceType.BASIC, districtIndex = 0),
                     ),
-                districts = listOf(CreateDistrictRequest("Red", "FF0000", BigDecimal("0.5000"))),
+                districts = listOf(CreateDistrictRequest("Red", "FF0000")),
             )
 
         val errors = DistrictProgressionValidator.validate(req)
@@ -163,7 +159,6 @@ class DistrictProgressionValidatorTest {
                         CreateDistrictRequest(
                             "Red",
                             "FF0000",
-                            minimumStockPercentage = BigDecimal("0.5000"),
                             progressions = listOf(progression(2), progression(2)),
                         )
                     ),
@@ -190,7 +185,6 @@ class DistrictProgressionValidatorTest {
                         CreateDistrictRequest(
                             "Red",
                             "FF0000",
-                            minimumStockPercentage = BigDecimal("0.5000"),
                             progressions = listOf(progression(2, price = "1.0000")),
                         )
                     ),
@@ -205,7 +199,6 @@ class DistrictProgressionValidatorTest {
                         CreateDistrictRequest(
                             "Red",
                             "FF0000",
-                            minimumStockPercentage = BigDecimal("0.5000"),
                             progressions = listOf(progression(2, maxCapital = "0.9000")),
                         )
                     ),
@@ -220,7 +213,6 @@ class DistrictProgressionValidatorTest {
                         CreateDistrictRequest(
                             "Red",
                             "FF0000",
-                            minimumStockPercentage = BigDecimal("0.5000"),
                             progressions = listOf(progression(2, price = "1.1")),
                         )
                     ),
@@ -243,7 +235,6 @@ class DistrictProgressionValidatorTest {
                         CreateDistrictRequest(
                             "Red",
                             "FF0000",
-                            minimumStockPercentage = BigDecimal("0.5000"),
                             progressions =
                                 listOf(progression(2, price = "2.5000", maxCapital = "3.0000")),
                         )

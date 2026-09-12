@@ -11,8 +11,8 @@
 const HEX_COLOR_PATTERN = /^[0-9A-Fa-f]{6}$/;
 
 /**
- * The server's BigDecimal percentage fields (basePricePercentage, minimumStockPercentage, the
- * boost percentages) must reach it with exactly this many digits after the decimal point -- see
+ * The server's BigDecimal percentage fields (basePricePercentage, the boost percentages) must
+ * reach it with exactly this many digits after the decimal point -- see
  * api/json.ts. Someone filling out the form shouldn't have to type that themselves though: ".05"
  * and "0.0500" mean the same thing, and the form should accept either. So the rule here is the
  * opposite of what the server enforces -- at most this many decimal digits, not exactly -- and

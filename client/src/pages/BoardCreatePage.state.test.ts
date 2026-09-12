@@ -90,9 +90,9 @@ describe("removeDistrictAt", () => {
       ...emptyBoardForm(),
       spaces,
       districts: [
-        { localId: "d0", name: "A", colorHex: "000000", minimumStockPercentage: "0.5000", progressionValues: {} },
-        { localId: "d1", name: "B", colorHex: "111111", minimumStockPercentage: "0.5000", progressionValues: {} },
-        { localId: "d2", name: "C", colorHex: "222222", minimumStockPercentage: "0.5000", progressionValues: {} },
+        { localId: "d0", name: "A", colorHex: "000000", progressionValues: {} },
+        { localId: "d1", name: "B", colorHex: "111111", progressionValues: {} },
+        { localId: "d2", name: "C", colorHex: "222222", progressionValues: {} },
       ],
     };
 
@@ -127,7 +127,6 @@ describe("buildCreateBoardRequest", () => {
           localId: "d0",
           name: " Downtown ",
           colorHex: "1e90ff",
-          minimumStockPercentage: ".5",
           progressionValues: {
             2: { priceMultiplier: " 1.1 ", maxCapitalMultiplier: "1.2" },
           },
@@ -135,9 +134,9 @@ describe("buildCreateBoardRequest", () => {
       ],
     };
 
-    // basePricePercentage, minimumStockPercentage, and the progression multipliers were all
-    // typed in shorthand (".05", ".5", "1.1", "1.2") -- buildCreateBoardRequest is where that gets
-    // padded out to the exact 4-decimal-digit strings the server's BigDecimal fields require.
+    // basePricePercentage and the progression multipliers were all typed in shorthand (".05",
+    // "1.1", "1.2") -- buildCreateBoardRequest is where that gets padded out to the exact
+    // 4-decimal-digit strings the server's BigDecimal fields require.
     expect(buildCreateBoardRequest(form)).toEqual({
       name: "My Board",
       spaces: [
@@ -157,7 +156,6 @@ describe("buildCreateBoardRequest", () => {
         {
           name: "Downtown",
           colorHex: "1E90FF",
-          minimumStockPercentage: "0.5000",
           progressions: [
             { ownedShopCount: 2, priceMultiplier: "1.1000", maxCapitalMultiplier: "1.2000" },
           ],
@@ -293,8 +291,8 @@ describe("buildGraphPreview", () => {
 
   it("colors a SHOP space by its district once the district has a valid colorHex, otherwise falls back", () => {
     const districts: DistrictFormState[] = [
-      { localId: "d0", name: "Uptown", colorHex: "FF00AA", minimumStockPercentage: "", progressionValues: {} },
-      { localId: "d1", name: "Midtown", colorHex: "not-a-color", minimumStockPercentage: "", progressionValues: {} },
+      { localId: "d0", name: "Uptown", colorHex: "FF00AA", progressionValues: {} },
+      { localId: "d1", name: "Midtown", colorHex: "not-a-color", progressionValues: {} },
     ];
     const spaces: SpaceFormState[] = [
       { localId: "s0", spaceType: "SHOP", baseValue: "", basePricePercentage: "", districtIndex: 0 },

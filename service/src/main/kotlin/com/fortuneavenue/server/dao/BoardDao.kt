@@ -58,7 +58,6 @@ class BoardDao {
     data class DistrictInput(
         val name: String,
         val colorHex: String,
-        val minimumStockPercentage: BigDecimal,
         val progressionInputs: List<ProgressionInput> = emptyList(),
     )
 
@@ -97,7 +96,6 @@ class BoardDao {
                 // `this.name = name` above for Board.new).
                 this.name = input.name
                 colorHex = input.colorHex
-                minimumStockPercentage = input.minimumStockPercentage
             }
         }
         districts.firstOrNull()?.flush()

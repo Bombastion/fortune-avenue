@@ -19,8 +19,8 @@ data class GameSnapshot(
     val players: List<PlayerSnapshot>,
     /**
      * Every SHOP space's current value in this game, owned or not -- lets a reconnecting client
-     * show accurate prices for shops it hasn't personally seen a shop_purchased/
-     * district_values_recalculated event for yet.
+     * show accurate prices for shops it hasn't personally seen a shop_purchased/invested event for
+     * yet.
      */
     val shopValues: List<ShopValueSnapshot>,
     /** Every district's current per-share stock value in this game. */
@@ -44,17 +44,18 @@ data class PlayerSnapshot(
 
 data class StockHoldingSnapshot(val districtId: Uuid, val quantity: Int)
 
-data class ShopValueSnapshot(val spaceId: Uuid, val currentValue: Int)
+/** [maxCap] is how much more [currentValue] can still grow from investment right now. */
+data class ShopValueSnapshot(val spaceId: Uuid, val currentValue: Int, val maxCap: Int)
 
 data class StockValueSnapshot(val districtId: Uuid, val currentStockValue: Int)
 
 /**
  * Whichever decision (if any) [GameSnapshot.activePlayerId] currently has movement paused on --
  * mirrors [GameSimulationService.TurnEvent]'s ChoiceRequired/ShopPurchaseAvailable/
- * StockTradingAvailable one-for-one, just derived by reading back persisted state (see
- * [GameSimulationService.pendingDecisionFor]) instead of live from a move actually happening. At
- * most one of these is ever true at a time -- the same three pauses are mutually exclusive live,
- * too.
+ * InvestmentAvailable/StockTradingAvailable one-for-one, just derived by reading back persisted
+ * state (see [GameSimulationService.pendingDecisionFor]) instead of live from a move actually
+ * happening. At most one of these is ever true at a time -- the same four pauses are mutually
+ * exclusive live, too.
  */
 sealed interface PendingDecisionSnapshot {
     data class ChoicePending(
@@ -64,6 +65,10 @@ sealed interface PendingDecisionSnapshot {
     ) : PendingDecisionSnapshot
 
     data class ShopPurchasePending(val spaceId: Uuid, val price: Int) : PendingDecisionSnapshot
+
+    /** [currentValue] is the shop's value before whatever gets invested. */
+    data class InvestmentPending(val spaceId: Uuid, val currentValue: Int, val maxCap: Int) :
+        PendingDecisionSnapshot
 
     data class StockTradePending(val spaceId: Uuid, val offers: List<StockTradeOffer>) :
         PendingDecisionSnapshot

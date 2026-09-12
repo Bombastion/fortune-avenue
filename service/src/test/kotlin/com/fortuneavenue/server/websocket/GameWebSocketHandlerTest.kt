@@ -142,9 +142,13 @@ class GameWebSocketHandlerTest : DatabaseTest() {
                     .get(5, TimeUnit.SECONDS)
         }
 
-        fun send(type: String, spaceId: String? = null) {
+        fun send(type: String, spaceId: String? = null, amount: Int? = null) {
             session.sendMessage(
-                TextMessage(objectMapper.writeValueAsString(ClientMessage(type, spaceId)))
+                TextMessage(
+                    objectMapper.writeValueAsString(
+                        ClientMessage(type = type, spaceId = spaceId, amount = amount)
+                    )
+                )
             )
         }
 
@@ -405,7 +409,6 @@ class GameWebSocketHandlerTest : DatabaseTest() {
                             CreateDistrictRequest(
                                 name = "Red",
                                 colorHex = "FF0000",
-                                minimumStockPercentage = BigDecimal("0.5000"),
                                 progressions =
                                     listOf(
                                         CreateDistrictProgressionRequest(
@@ -838,8 +841,9 @@ class GameWebSocketHandlerTest : DatabaseTest() {
         assertThat(client.nextEvent()["type"].asText()).isEqualTo("turn_ended")
         assertThat(client.nextEvent()["type"].asText()).isEqualTo("turn_started")
 
-        // A purchase never mutates currentValue anymore -- only investment does, and that's not
-        // wired up yet -- so both shops are still sitting at the price they were bought for.
+        // A purchase never mutates currentValue by itself -- only investing does (see the
+        // "invest raises a shop's value..." test below) -- so both shops are still sitting at
+        // the price they were bought for.
         assertThat(
                 gameShopInformationDao
                     .findByGameAndSpace(Uuid.parse(game.id), Uuid.parse(firstShopSpaceId))
@@ -869,6 +873,186 @@ class GameWebSocketHandlerTest : DatabaseTest() {
         val playerId = Uuid.parse(player.id)
         assertThat(playerDao.findState(playerId)!!.currentGold)
             .isEqualTo(board.startingGold - 100 - 200)
+    }
+
+    @Test
+    fun `investing after landing on your own shop raises its value and ends the turn`() {
+        val board = createDistrictShopBoard()
+        val game = createGame(board)
+        val player = addHumanPlayer(game.id)
+        val firstShopSpaceId = board.spaces[1].id
+        val secondShopSpaceId = board.spaces[2].id
+        val client = RecordingClient().also { it.connect(game.id, player.id) }
+        assertThat(client.nextEvent()["type"].asText()).isEqualTo("connected")
+
+        client.send("ready")
+        client.nextEvent() // player_ready
+        client.nextEvent() // game_started
+        client.nextEvent() // turn_started
+
+        // Turn 1: buy the first shop.
+        (dice as QueuedDice).enqueue(1)
+        client.send("roll_dice")
+        client.nextEvent() // dice_rolled
+        client.nextEvent() // player_moved
+        client.nextEvent() // shop_purchase_available
+        client.send("buy_shop")
+        client.nextEvent() // shop_purchased
+        client.nextEvent() // turn_ended
+        client.nextEvent() // turn_started
+
+        // Turn 2: buy the second shop -- owning 2 in the district now opens up investable
+        // headroom on both (see the "buying a second shop..." test above for the exact numbers).
+        (dice as QueuedDice).enqueue(1)
+        client.send("roll_dice")
+        client.nextEvent() // dice_rolled
+        client.nextEvent() // player_moved
+        client.nextEvent() // shop_purchase_available
+        client.send("buy_shop")
+        client.nextEvent() // shop_purchased
+        client.nextEvent() // turn_ended
+        client.nextEvent() // turn_started
+
+        val goldBeforeInvesting = playerDao.findState(Uuid.parse(player.id))!!.currentGold
+
+        // Turn 3: go all the way around the board (8 spaces) to land back exactly on the second
+        // shop -- already owned, with headroom left, so movement pauses there for an investment
+        // decision instead of ending the turn outright.
+        (dice as QueuedDice).enqueue(8)
+        client.send("roll_dice")
+        client.nextEvent() // dice_rolled
+        val moved = client.nextEvent()
+        assertThat(moved["toSpaceId"].asText()).isEqualTo(secondShopSpaceId)
+        val pauseEvent = client.nextEvent()
+        assertThat(pauseEvent["type"].asText()).isEqualTo("investment_available")
+        assertThat(pauseEvent["spaceId"].asText()).isEqualTo(secondShopSpaceId)
+        assertThat(pauseEvent["currentValue"].asInt()).isEqualTo(200)
+        assertThat(pauseEvent["maxCap"].asInt()).isEqualTo(100)
+
+        client.send("invest", amount = 30)
+        val invested = client.nextEvent()
+        assertThat(invested["type"].asText()).isEqualTo("invested")
+        assertThat(invested["spaceId"].asText()).isEqualTo(secondShopSpaceId)
+        assertThat(invested["amount"].asInt()).isEqualTo(30)
+        assertThat(invested["newCurrentValue"].asInt()).isEqualTo(230)
+        assertThat(invested["newMaxCap"].asInt()).isEqualTo(70)
+
+        // Investing ends the turn right after, exactly like buying a shop does.
+        assertThat(client.nextEvent()["type"].asText()).isEqualTo("turn_ended")
+        assertThat(client.nextEvent()["type"].asText()).isEqualTo("turn_started")
+
+        val playerId = Uuid.parse(player.id)
+        assertThat(playerDao.findState(playerId)!!.currentGold).isEqualTo(goldBeforeInvesting - 30)
+        assertThat(
+                gameShopInformationDao
+                    .findByGameAndSpace(Uuid.parse(game.id), Uuid.parse(secondShopSpaceId))
+                    ?.currentValue
+            )
+            .isEqualTo(230)
+        assertThat(
+                gameShopInformationDao
+                    .findByGameAndSpace(Uuid.parse(game.id), Uuid.parse(secondShopSpaceId))
+                    ?.maxCap
+            )
+            .isEqualTo(70)
+        // firstShop is untouched by investing in the second one.
+        assertThat(
+                gameShopInformationDao
+                    .findByGameAndSpace(Uuid.parse(game.id), Uuid.parse(firstShopSpaceId))
+                    ?.currentValue
+            )
+            .isEqualTo(100)
+    }
+
+    @Test
+    fun `declining an investment ends the turn without investing`() {
+        val board = createDistrictShopBoard()
+        val game = createGame(board)
+        val player = addHumanPlayer(game.id)
+        val secondShopSpaceId = board.spaces[2].id
+        val client = RecordingClient().also { it.connect(game.id, player.id) }
+        assertThat(client.nextEvent()["type"].asText()).isEqualTo("connected")
+
+        client.send("ready")
+        client.nextEvent() // player_ready
+        client.nextEvent() // game_started
+        client.nextEvent() // turn_started
+
+        // Turn 1: buy the first shop.
+        (dice as QueuedDice).enqueue(1)
+        client.send("roll_dice")
+        client.nextEvent() // dice_rolled
+        client.nextEvent() // player_moved
+        client.nextEvent() // shop_purchase_available
+        client.send("buy_shop")
+        client.nextEvent() // shop_purchased
+        client.nextEvent() // turn_ended
+        client.nextEvent() // turn_started
+
+        // Turn 2: buy the second shop.
+        (dice as QueuedDice).enqueue(1)
+        client.send("roll_dice")
+        client.nextEvent() // dice_rolled
+        client.nextEvent() // player_moved
+        client.nextEvent() // shop_purchase_available
+        client.send("buy_shop")
+        client.nextEvent() // shop_purchased
+        client.nextEvent() // turn_ended
+        client.nextEvent() // turn_started
+
+        val goldBeforeDeclining = playerDao.findState(Uuid.parse(player.id))!!.currentGold
+
+        // Turn 3: land back on the second shop again and decline to invest.
+        (dice as QueuedDice).enqueue(8)
+        client.send("roll_dice")
+        client.nextEvent() // dice_rolled
+        client.nextEvent() // player_moved
+        assertThat(client.nextEvent()["type"].asText()).isEqualTo("investment_available")
+
+        client.send("decline_invest")
+        assertThat(client.nextEvent()["type"].asText()).isEqualTo("turn_ended")
+        assertThat(client.nextEvent()["type"].asText()).isEqualTo("turn_started")
+
+        val playerId = Uuid.parse(player.id)
+        assertThat(playerDao.findState(playerId)!!.currentGold).isEqualTo(goldBeforeDeclining)
+        assertThat(
+                gameShopInformationDao
+                    .findByGameAndSpace(Uuid.parse(game.id), Uuid.parse(secondShopSpaceId))
+                    ?.currentValue
+            )
+            .isEqualTo(200)
+    }
+
+    @Test
+    fun `invest fails when a branch choice is pending, not an investment decision`() {
+        // The branching board's start space forks immediately, so a single roll pauses movement
+        // on a choice without ending the turn -- currentMovementPoints stays non-null there,
+        // exactly the state invest is supposed to refuse (an investment decision only exists once
+        // movement has actually finished on an owned shop).
+        val game = createGame(createBranchingBoard())
+        val player = addHumanPlayer(game.id)
+        val client = RecordingClient().also { it.connect(game.id, player.id) }
+        assertThat(client.nextEvent()["type"].asText()).isEqualTo("connected")
+
+        client.send("ready")
+        client.nextEvent() // player_ready
+        client.nextEvent() // game_started
+        client.nextEvent() // turn_started
+
+        (dice as QueuedDice).enqueue(1)
+        client.send("roll_dice")
+        client.nextEvent() // dice_rolled
+        val choiceEvent = client.nextEvent()
+        assertThat(choiceEvent["type"].asText()).isEqualTo("choice_required")
+        val optionSpaceId = choiceEvent["options"][0]["toSpaceId"].asText()
+
+        client.send("invest", amount = 10)
+        val error = client.nextEvent()
+        assertThat(error["type"].asText()).isEqualTo("error")
+
+        // The pending branch choice is still there, untouched by the rejected invest.
+        client.send("choose_path", spaceId = optionSpaceId)
+        assertThat(client.nextEvent()["type"].asText()).isEqualTo("player_moved")
     }
 
     companion object {

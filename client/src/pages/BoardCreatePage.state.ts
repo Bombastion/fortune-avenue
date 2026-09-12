@@ -46,7 +46,6 @@ export interface DistrictFormState {
   localId: string;
   name: string;
   colorHex: string;
-  minimumStockPercentage: string;
   /** Keyed by ownedShopCount. Rows are derived from how many spaces point at this district (see
    * requiredProgressionLevels below) -- entries for levels no longer required are kept around
    * (not deleted) so the values aren't lost if the user temporarily reassigns a space away and
@@ -80,13 +79,7 @@ export function newPath(): PathFormState {
 }
 
 export function newDistrict(): DistrictFormState {
-  return {
-    localId: newLocalId(),
-    name: "",
-    colorHex: "",
-    minimumStockPercentage: "",
-    progressionValues: {},
-  };
+  return { localId: newLocalId(), name: "", colorHex: "", progressionValues: {} };
 }
 
 export function emptyBoardForm(): BoardFormState {
@@ -269,14 +262,6 @@ export function validateBoardForm(form: BoardFormState): BoardValidationResult {
         `District #${index}: colorHex must be exactly 6 hex characters (0-9, A-F).`,
       );
     }
-    if (!isFractionStrictlyBetweenZeroAndOne(district.minimumStockPercentage)) {
-      addError(
-        result,
-        `districts.${index}.minimumStockPercentage`,
-        `District #${index}: minimumStockPercentage must be strictly between 0 and 1 (e.g. 0.5 or .5), with at most ${DECIMAL_SCALE} decimal digits.`,
-      );
-    }
-
     const spaceCount = spaceCountForDistrict(form.spaces, index);
     const levels = requiredProgressionLevels(spaceCount);
     for (const level of levels) {
@@ -352,7 +337,6 @@ export function buildCreateBoardRequest(form: BoardFormState): CreateBoardReques
     return {
       name: district.name.trim(),
       colorHex: district.colorHex.trim().toUpperCase(),
-      minimumStockPercentage: toFixedDecimalString(district.minimumStockPercentage),
       progressions,
     };
   });

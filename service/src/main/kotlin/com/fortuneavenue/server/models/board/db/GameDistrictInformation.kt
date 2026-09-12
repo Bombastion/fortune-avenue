@@ -11,6 +11,5 @@ class GameDistrictInformation(id: EntityID<Uuid>) : UuidEntity(id) {
     var gameId by GameDistrictInformationTable.gameId
     var districtId by GameDistrictInformationTable.districtId
     var boardId by GameDistrictInformationTable.boardId
-    var minimumStockPercentage by GameDistrictInformationTable.minimumStockPercentage
     var currentStockValue by GameDistrictInformationTable.currentStockValue
 }

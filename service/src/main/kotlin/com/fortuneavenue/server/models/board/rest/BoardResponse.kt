@@ -28,7 +28,6 @@ data class DistrictResponse(
     val id: String,
     val name: String,
     val colorHex: String,
-    val minimumStockPercentage: BigDecimal,
     val progressions: List<DistrictProgressionResponse> = emptyList(),
 )
 
@@ -82,7 +81,6 @@ fun BoardGraph.toResponse(): BoardResponse {
                     id = district.id.value.toString(),
                     name = district.name,
                     colorHex = district.colorHex,
-                    minimumStockPercentage = district.minimumStockPercentage,
                     progressions =
                         progressionsByDistrictId[district.id.value]
                             .orEmpty()

@@ -65,7 +65,6 @@ class BoardService(private val boardDao: BoardDao) {
                         BoardDao.DistrictInput(
                             name = district.name,
                             colorHex = district.colorHex,
-                            minimumStockPercentage = district.minimumStockPercentage,
                             progressionInputs =
                                 district.progressions.map {
                                     BoardDao.ProgressionInput(

@@ -64,7 +64,6 @@ class PlayerStockDaoTest : DatabaseTest() {
                         BoardDao.DistrictInput(
                             name = "district-${Uuid.random()}",
                             colorHex = "336699",
-                            minimumStockPercentage = BigDecimal("0.5000"),
                         )
                     ),
             )
